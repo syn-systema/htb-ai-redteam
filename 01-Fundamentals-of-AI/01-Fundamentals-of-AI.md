@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 19
+sections_done: 21
 started: "2026-04-14"
 completed: ""
 ---
@@ -2762,13 +2762,325 @@ This is roughly the shape of VGG16 (a classic CNN). ResNet, DenseNet, EfficientN
 
 ### 20. Recurrent Neural Networks
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-15
+
+An architecture for **sequential data** — where order matters. Unlike CNNs (which assume spatial structure) or MLPs (which assume independent features), RNNs assume a **temporal or sequential** relationship between inputs. Each step's output depends on previous steps via a **hidden state** that carries context forward.
+
+Most modern text processing uses **transformers** (§22), not RNNs. But understanding RNNs matters because:
+1. The vanishing-gradient problem here is exactly *why* transformers won.
+2. RNNs remain in production for speech recognition, network-traffic IDS, system-call sequence analysis, and some malware behavior models.
+3. The stateful "carry context forward" intuition carries over to how LLMs generate text token-by-token at inference time.
+
+#### The recurrent loop
+
+A single RNN cell applied repeatedly across timesteps:
+
+```
+                     ┌─────────────────────────┐
+                     │   RNN cell              │
+                     │                         │
+                     │   h_t = tanh(W_h h_{t−1}│
+                     │          + W_x x_t + b) │
+                     │                         │
+     h_{t−1} ────────┼─────────────────────────┼───── h_t (→ next step)
+                     │                         │
+     x_t ────────────┼─────────────────────────┼───── y_t (optional output)
+                     └─────────────────────────┘
+```
+
+At each timestep $t$:
+- Input $x_t$ (e.g. a word, a waveform sample)
+- Previous hidden state $h_{t-1}$ (the "memory" of what happened so far)
+- Compute new hidden state $h_t = \tanh(W_h h_{t-1} + W_x x_t + b)$
+- Optionally emit output $y_t$
+
+The same weights $(W_h, W_x)$ are used at every timestep — like CNNs' weight sharing across space, RNNs share weights across time.
+
+##### Unrolled view
+
+The same cell applied across a sequence:
+
+```
+        h₀ ──▶ [cell] ──▶ h₁ ──▶ [cell] ──▶ h₂ ──▶ [cell] ──▶ h₃
+                 ▲                ▲                ▲
+                 │                │                │
+                x₁               x₂               x₃
+                ("The")          ("cat")          ("sat")
+                 │                │                │
+                 ▼                ▼                ▼
+                y₁               y₂               y₃
+```
+
+By the time the RNN finishes processing "The cat sat on the mat", $h_6$ contains a compressed representation of the entire sentence.
+
+#### Forward pass math
+
+For a vanilla RNN:
+
+$$
+h_t = \tanh(W_h \, h_{t-1} + W_x \, x_t + b_h)
+$$
+
+$$
+y_t = \text{softmax}(W_y \, h_t + b_y)
+$$
+
+**Training uses Backpropagation Through Time (BPTT)** — unroll the network across timesteps, then apply standard backprop. Each weight update accumulates gradients from every timestep.
+
+#### The vanishing (and exploding) gradient problem
+
+The big flaw of vanilla RNNs. During BPTT, gradients must propagate backward through every timestep, each propagation involving a multiplication by the recurrent weight matrix $W_h$:
+
+$$
+\frac{\partial \mathcal{L}}{\partial h_t} \propto W_h^{T - t} \cdot (\text{later gradients})
+$$
+
+After many timesteps ($T - t$ large):
+
+| If eigenvalues of $W_h$ are... | Then... | Result |
+|---|---|---|
+| **< 1** | Gradients shrink exponentially (multiplied by small numbers many times) | **Vanishing gradient** — early timesteps effectively receive zero signal; long-range dependencies cannot be learned |
+| **> 1** | Gradients grow exponentially | **Exploding gradient** — training diverges or becomes unstable (often fixed with gradient clipping) |
+
+**Consequence:** a vanilla RNN can barely remember anything more than ~10 timesteps back. For a language model trying to understand "The book *that I bought yesterday which was written by a Nobel laureate who lived in Paris in the 1920s* is..." — the long dependency between "book" and "is" gets lost.
+
+#### LSTM — Long Short-Term Memory
+
+Hochreiter & Schmidhuber 1997's solution. LSTM replaces the vanilla RNN cell with a more elaborate structure: a **memory cell** $c_t$ that carries information across time with *additive* updates (not multiplicative), plus three **gates** that learn to control what gets stored, forgotten, and output.
+
+```
+                    ┌───────────────────────────────────────────┐
+                    │  LSTM cell                                │
+                    │                                           │
+    c_{t−1} ────────┤────► c_t (cell state — long-term memory)  │
+                    │                                           │
+                    │  ┌──────┐    ┌──────┐    ┌──────┐         │
+                    │  │forget│    │input │    │output│         │
+    h_{t−1} ────────┤─▶│ gate │───▶│ gate │───▶│ gate │─────────┤─▶ h_t
+                    │  │ f_t  │    │ i_t  │    │ o_t  │         │
+                    │  └──────┘    └──────┘    └──────┘         │
+                    │                                           │
+    x_t ────────────┤──────────────────▲────────────────────────┤
+                    └─────────────────────────────────────────────┘
+```
+
+| Gate | Symbol | Controls |
+|---|---|---|
+| **Forget** | $f_t$ | How much of the previous cell state $c_{t-1}$ to keep |
+| **Input** | $i_t$ | How much of the new candidate info to add to the cell |
+| **Output** | $o_t$ | How much of the cell state to expose as the hidden state $h_t$ |
+
+Each gate is a sigmoid that outputs values in $[0, 1]$ — effectively a per-dimension on/off switch learned from data. The gating structure lets the cell state $c_t$ flow across many timesteps **with minimal distortion**, dodging the vanishing-gradient problem.
+
+#### GRU — Gated Recurrent Unit
+
+Cho et al. 2014's simpler alternative. Fewer parameters, often comparable performance to LSTM.
+
+| Gate | Controls |
+|---|---|
+| **Update** $z_t$ | How much of the previous hidden state to keep vs replace with new info |
+| **Reset** $r_t$ | How much of the previous hidden state to combine with the current input |
+
+GRU merges LSTM's separate cell state and hidden state into a single $h_t$, and combines the forget + input gates into a single update gate. Two gates instead of three → fewer parameters → faster training. In practice, LSTM and GRU perform comparably; pick by compute budget.
+
+#### Bidirectional RNNs
+
+Standard RNNs process left-to-right, so $h_t$ only knows about the past. But for tasks where the full sequence is available at once (e.g. sentence classification, not live transcription), you can run two RNNs simultaneously:
+
+- Forward RNN: $\overrightarrow{h_t}$ depends on $x_1, x_2, \dots, x_t$
+- Backward RNN: $\overleftarrow{h_t}$ depends on $x_T, x_{T-1}, \dots, x_t$
+- Combined: $h_t = [\overrightarrow{h_t} \,;\, \overleftarrow{h_t}]$ (concatenation)
+
+Now $h_t$ encodes context from both directions. **BiLSTMs** (bidirectional LSTMs) were the dominant NLP architecture until BERT (2018) and the transformer explosion.
+
+#### Why transformers replaced RNNs
+
+Three big reasons, all relevant to Module 22 (LLMs):
+
+1. **Parallelization.** RNNs must process timesteps sequentially (each $h_t$ depends on $h_{t-1}$). Transformers process all positions in parallel via attention → much faster on GPUs.
+2. **Long-range dependencies.** Transformers let any position directly attend to any other position (constant path length). RNNs must propagate information step-by-step ($O(T)$ path length) → even LSTMs struggle with very long sequences.
+3. **Scaling.** Transformers scale better to billions of parameters and trillions of training tokens than RNNs ever did.
+
+But RNNs haven't disappeared — they remain competitive for **streaming / latency-critical** applications (speech recognition where you must process audio as it arrives; real-time network traffic analysis) and are often *more* parameter-efficient on smaller tasks.
+
+#### Red-team angles
+
+- **RNN adversarial examples exist but are less studied than CNN ones.** Text-domain adversarial attacks against RNN sentiment classifiers exist (word swaps, synonym replacement, character perturbations) — see HotFlip, TextFooler. The gradient machinery is the same as CNNs'; the constraint is that perturbations must remain valid tokens (discrete) instead of continuous pixels.
+- **Sequence poisoning / trigger injection.** Trojan attacks on text classifiers often embed a specific token sequence (e.g. a rare phrase) as a trigger. Because RNNs' hidden states are shaped by every input they see, inserting a crafted trigger at any position can steer later predictions. Direct analog to CNN trojan patches.
+- **Hidden-state manipulation.** If an attacker has access to intermediate hidden states (in federated / distributed systems, or via model-extraction proxies), they can craft *prefix sequences* that push the hidden state into attacker-chosen regions before the target input arrives. The resulting classification is hijacked.
+- **LSTMs in malware behavior analysis are a well-documented attack target.** Systems that model system-call sequences (sequence of `execve`, `open`, `connect`, etc.) with LSTMs can be evaded by inserting **benign filler calls** between malicious operations — diluting the attack signature in the hidden state. Research: "Malware Evasion Attacks Against API-Call-Based Detection."
+- **Streaming ASR (speech recognition) evasion.** RNN-based speech recognizers can be fooled by crafted audio perturbations (Carlini & Wagner 2018's "Audio Adversarial Examples") that sound like one phrase to humans but transcribe to a different, attacker-chosen phrase.
+- **Bidirectional RNNs are harder to attack than unidirectional ones.** An adversarial perturbation must succeed against both forward and backward passes simultaneously — effectively a constrained optimization with two objectives. Single-direction attacks often break under bidirectional processing.
+- **RNN inference at deployment is stateful.** For models that process live streams, the hidden state from the previous request persists. An attacker who can influence prior requests can poison the hidden state going into the target request. This is a real concern for stateful conversational systems.
+- **The "token-by-token generation" pattern used by LLMs at inference** is conceptually an RNN even though the model is a transformer. Each generated token becomes the next input; the process is sequential. Jailbreak techniques that work by gradually steering the conversation across multiple turns are exploiting this stateful inference dynamic — explicitly an RNN-like state accumulation in the KV cache.
+
+**Takeaways:**
+- RNN = NN with recurrent connections; each step's output depends on prior via hidden state $h_t = \tanh(W_h h_{t-1} + W_x x_t + b)$.
+- Vanilla RNNs suffer vanishing/exploding gradients → can't learn long-range dependencies.
+- **LSTM** (3 gates: forget/input/output + cell state) and **GRU** (2 gates: update/reset) fix this via gating + additive state updates.
+- **Bidirectional RNNs** process forward + backward, concatenate hidden states — dominant NLP architecture before BERT.
+- Transformers (§22) mostly replaced RNNs for text: parallelization, long-range dependencies, scaling — but RNNs persist for streaming + low-latency applications.
+- Adversarial attacks on RNNs include sequence poisoning, hidden-state manipulation, benign-filler evasion of sequence-based malware detectors, and audio adversarial examples against speech recognizers.
 
 ---
 
 ### 21. Introduction to Generative AI
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-15
+
+A completely different framing of ML. Where discriminative models (everything through §20) learn a conditional distribution $P(y \mid x)$ — "given input $x$, what's the label $y$?" — **generative models learn the data distribution itself** $P(x)$, or in conditional form $P(x \mid c)$ (e.g. "images of cats" given $c = $ "cat"). Once you have $P(x)$, you can **sample** from it → generate new content.
+
+This framing change matters for red teaming: **you now attack the data distribution the model represents, not just its decision boundary.**
+
+#### Discriminative vs generative — the core distinction
+
+| | Discriminative | Generative |
+|---|---|---|
+| Learns | $P(y \mid x)$ — conditional probability of label given input | $P(x)$ or $P(x \mid c)$ — distribution of the data itself |
+| Output | Class labels, regression values | New data samples (images, text, audio, code) |
+| Example | "Is this image a cat?" (Modules 09–10 targets) | "Generate an image of a cat" (Stable Diffusion, Midjourney) |
+| Attack surface | Adversarial examples flip predictions | Attacks include: extract training data, craft prompts for harmful outputs, evade provenance detectors |
+
+#### The pipeline — train, generate, evaluate
+
+```
+1. TRAIN       Fit the model to a large dataset. It learns the statistical
+                 patterns that make the data "look right."
+
+2. GENERATE    Start from noise or a prompt. Iteratively refine / decode
+                 to produce output that matches the learned distribution.
+
+3. EVALUATE    Measure quality (realism), diversity (coverage of modes), and
+                 sometimes prompt-adherence (did the output match the request?).
+```
+
+Step 3 is harder than for discriminative models — there's no single "correct answer" to compare against. Standard metrics are partial proxies (more below).
+
+#### The four families of generative models
+
+| Family | Core mechanism | Famous examples | Where in path |
+|---|---|---|---|
+| **GANs** (Generative Adversarial Networks) | Two networks: a **generator** makes samples, a **discriminator** tries to distinguish fake from real. They train adversarially — generator tries to fool discriminator, discriminator gets better at spotting fakes | StyleGAN, BigGAN | Deepfakes; classical image synthesis |
+| **VAEs** (Variational Autoencoders) | An encoder maps data to a probabilistic latent space; a decoder samples and reconstructs | β-VAE, NVAE | Controlled generation with explicit latent structure |
+| **Autoregressive models** | Generate one element at a time, each conditioned on previous elements. $P(x) = \prod_t P(x_t \mid x_{<t})$ | **GPT, Llama, Claude — every modern LLM is autoregressive** | §22 LLMs → Modules 04, 05 |
+| **Diffusion models** | Add noise progressively to data, then train a network to reverse the noise | Stable Diffusion, DALL-E, Imagen | §23 diffusion models |
+
+The three attacks-of-note architectures for this path are **autoregressive (LLMs)** and **diffusion (images)**. GANs are mostly displaced in image generation by diffusion; VAEs are foundational but less deployed standalone.
+
+#### GAN training — the adversarial game
+
+```
+             ┌─────────────┐          real / fake?
+             │             │              ▲
+             │  Generator  │─────┐        │
+             │    G(z)     │     │        │
+             └─────────────┘     │   ┌─────────────┐
+                     ▲           └──▶│Discriminator│
+                     │                │   D(x)      │
+               random ●                └─────────────┘
+               noise z ──                    ▲
+                                             │
+                                     real data x (training set)
+
+   G tries to produce x = G(z) that D classifies as "real".
+   D tries to correctly distinguish real x vs G(z).
+   They train together. At equilibrium, G's outputs are indistinguishable from real.
+```
+
+The minimax objective:
+
+$$
+\min_G \max_D \; \mathbb{E}_{x \sim p_{\text{data}}} [\log D(x)] + \mathbb{E}_{z \sim p_z} [\log(1 - D(G(z)))]
+$$
+
+GANs are notoriously unstable to train and subject to **mode collapse** (see below).
+
+#### Key concepts
+
+##### Latent space
+
+A compressed representation of the data, typically a low-dimensional vector space $z \in \mathbb{R}^d$ where similar data points map to nearby latent vectors.
+
+```
+  z₂
+  │   ● cats                            ● dogs
+  │    ● ● ●                             ● ●
+  │   ● ● ● ●                           ●  ● ●
+  │       ●                              ●
+  │                         ← interpolate along this line →
+  │                         get hybrid cat/dog images
+  │                           ● birds
+  │                          ● ● ●
+  │                           ●  ●
+  │                            ●
+  └─────────────────────────────────── z₁
+```
+
+Properties:
+- **Clustering** — similar concepts cluster in latent space.
+- **Interpolation** — smoothly walking between latent points produces smooth transitions in output space.
+- **Semantic directions** — specific axes in latent space sometimes correspond to meaningful attributes (e.g. "age" direction in face latents, "smile" direction).
+
+**Security relevance:** a latent space is a high-value extraction target. Recovering the latent space of a deployed generative model gives you near-total control: you can find the latent vector for any target output, and navigate to produce specific attacker-chosen content.
+
+##### Sampling
+
+Generating output = drawing from the learned distribution. Key parameters:
+
+| Parameter | Effect |
+|---|---|
+| **Random seed** | Determines the starting point of sampling → reproducibility |
+| **Temperature** (§15's $\tau$) | Controls randomness of sampling in autoregressive models |
+| **Top-k / top-p / nucleus sampling** | Restrict sampling to most-likely tokens to avoid low-quality outputs |
+| **Guidance scale** (diffusion) | How strongly the sample should follow the conditioning prompt |
+
+##### Mode collapse
+
+A GAN pathology where the generator learns to produce only a narrow slice of the true data distribution. If the training set has 1000 distinct output categories but the generator only ever outputs 3 variants, it has "collapsed" onto those 3 modes.
+
+Intuition: if the generator finds a single output that reliably fools the discriminator, it has no incentive to try other outputs. Gradient signal disappears.
+
+**Mode collapse as an attack:** poisoning training data (Module 06) to induce mode collapse is a documented attack — a model that collapses onto narrow outputs fails its task while looking ostensibly "trained."
+
+##### Overfitting in generative models
+
+Generative overfitting is worse than discriminative overfitting because it reveals **specific training data**. An overfit LLM can regurgitate training examples verbatim (names, addresses, copyrighted text, API keys). An overfit image model produces outputs nearly identical to training images.
+
+This is a direct pathway to **training-data extraction attacks** — see red-team angles.
+
+#### Evaluation metrics — quality and diversity
+
+Single-number metrics for generative models are imperfect, but standard:
+
+| Metric | What it measures | Higher is better? |
+|---|---|---|
+| **Inception Score (IS)** | Quality + diversity of generated images, using an Inception classifier's predictions | Higher |
+| **Fréchet Inception Distance (FID)** | Distance between distributions of generated vs real images in Inception feature space | **Lower** |
+| **BLEU (text)** | N-gram overlap between generated and reference text | Higher (0–1 scale) |
+| **Perplexity (text)** | How "surprised" a language model is by the text | **Lower** (on held-out data) |
+| **Human eval** | Subjective quality ratings | Higher |
+
+Each has known failure modes — BLEU rewards memorization; FID is biased toward ImageNet-like content; human eval is expensive and variable. Modern evaluation typically combines several.
+
+#### Red-team angles — generative AI has its own distinct attack surface
+
+- **Training-data extraction is the signature privacy attack against generative models.** Carlini et al. 2021 demonstrated that GPT-2 could be prompted to regurgitate verbatim training data including names, email addresses, phone numbers, and full code snippets. An LLM's memorization is indistinguishable from retrieval when the input matches a memorized context. **This is the generative analog of membership inference (Module 11), but strictly more powerful** — you don't just learn "was this in training," you retrieve the actual training content.
+- **Latent space reconstruction = near-total model control.** If an attacker can recover a generative model's latent space (via encoder extraction or repeated sampling), they can find the latent vector for any desired output. For face-generation models, this means producing arbitrary faces; for code models, specific malicious code; for image models, specific identifiable persons.
+- **Deepfakes and provenance attacks.** Every generative image/video model is a deepfake engine. Detection systems (DeepFake detection CNNs) are themselves classifiers → adversarial attacks on them to make fake content undetectable are a subfield. Provenance watermarking (embedding invisible "this was generated" markers) is being adversarially attacked and patched in an ongoing arms race.
+- **Prompt injection (Modules 04–05) weaponizes autoregressive generation.** LLMs generate tokens conditioned on the input prompt + prior output tokens. Adversarial prompts hijack this conditioning — the model "completes" the attacker's prompt instead of following its system instructions. The autoregressive decomposition $P(x) = \prod_t P(x_t \mid x_{<t})$ is exactly what makes this attack possible: once you've steered the early tokens, later tokens follow.
+- **Mode collapse as a poisoning objective.** Attackers with training-data influence can induce mode collapse by injecting duplicate or near-duplicate examples — the model learns "this is what the defender wants" and loses diversity, making it unable to handle legitimate varied inputs.
+- **Evaluation-metric gaming.** Generative models optimized to maximize BLEU or FID without caring about actual quality produce outputs that score well but are semantically broken. Attackers can craft inputs that score well on any single metric while failing human assessment. This matters when defenders use metric thresholds as guardrails ("only deploy models with BLEU > X").
+- **GAN-generated adversarial examples.** Samangouei et al. 2018's **Defense-GAN** and its attack-adaptive counterparts: train a GAN on clean data, use it to generate adversarial examples that look like natural data but fool discriminative classifiers. Advanced technique that combines generative + discriminative attack surfaces.
+- **Copyright and licensing exfiltration.** Models trained on copyrighted or proprietary data (code, text, images) will occasionally regurgitate verbatim. Tools like `gitcop` scan generated code for literal matches against training corpora. From an attacker's perspective, this is intelligence collection — query a commercial model to learn its training data composition.
+- **Diffusion model-specific attack: prompt-attribute decoupling.** Attackers can craft prompts that superficially ask for benign content but exploit subtle latent correlations to produce harmful content (e.g. prompts that don't contain the target identity's name but reliably produce that person's face due to training-set correlations).
+
+**Takeaways:**
+- Generative models learn $P(x)$ (the data distribution) instead of $P(y \mid x)$; sample from it to generate new content.
+- Four families: GANs (adversarial training), VAEs (latent-space encoder+decoder), **autoregressive** (next-element prediction — the architecture of all LLMs), **diffusion** (noise → denoise).
+- Key concepts: latent space, sampling, mode collapse, overfitting.
+- Evaluation: IS, FID (images), BLEU, perplexity (text), human eval — each imperfect.
+- **Training-data extraction is the signature privacy attack against generative models** — more powerful than membership inference.
+- Autoregressive decomposition $P(x) = \prod_t P(x_t \mid x_{<t})$ is exactly what makes **prompt injection (Modules 04–05) possible** — steer early tokens, later tokens follow.
 
 ---
 
