@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 13
+sections_done: 14
 started: "2026-04-14"
 completed: ""
 ---
@@ -1793,7 +1793,142 @@ For continuous tasks, $\gamma < 1$ is mathematically required (otherwise infinit
 
 ### 14. Q-Learning
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A **model-free** RL algorithm that learns the optimal **Q-function** $Q^*(s, a)$ — the expected long-run reward of taking action $a$ in state $s$ then acting optimally forever after. Once $Q^*$ is learned, the optimal policy is just $\pi^*(s) = \arg\max_a Q^*(s, a)$.
+
+"Model-free" means the agent never builds an explicit model of how the environment works — it just learns Q-values from experience.
+
+#### The Q-table — store one Q-value per (state, action) pair
+
+For small discrete state and action spaces, the Q-function is literally a lookup table:
+
+| State | Up | Down | Left | Right |
+|---|---|---|---|---|
+| $S_1$ | -1.0 | 0.0 | -0.5 | 0.2 |
+| $S_2$ | 0.0 | 1.0 | 0.0 | -0.3 |
+| $S_3$ | 0.5 | -0.5 | 1.0 | 0.0 |
+| $S_4$ | -0.2 | 0.0 | -0.3 | 1.0 |
+
+Each cell = "expected long-run reward if I take this action from this state." After training, picking the row's max-value column is the greedy policy.
+
+**The fundamental scalability problem:** the table grows as $|S| \times |A|$. For chess (~$10^{40}$ states), Go ($10^{170}$), or any high-dim sensor input (millions of pixels), a literal table is impossible. Solution: **Deep Q-Networks (DQN)** — replace the table with a neural net that maps $(s) \to Q(s, \cdot)$ for all actions. Same update rule, scaled up.
+
+#### The Q-Learning update rule (the Bellman equation)
+
+The heart of the algorithm. After observing transition $s \xrightarrow{a} s'$ with reward $r$:
+
+$$
+Q(s, a) \leftarrow Q(s, a) + \alpha \left[ r + \gamma \max_{a'} Q(s', a') - Q(s, a) \right]
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $Q(s, a)$ | Current estimate (gets updated) |
+| $\alpha$ | Learning rate ($0 < \alpha \leq 1$) — how much to trust the new evidence |
+| $r$ | Immediate reward observed |
+| $\gamma$ | Discount factor from §13 |
+| $\max_{a'} Q(s', a')$ | The best Q-value reachable from the next state — the "what could I do next?" lookahead |
+| $r + \gamma \max_{a'} Q(s', a')$ | The **TD target** — the new estimate of what $Q(s, a)$ "should" be |
+| $[\text{TD target} - Q(s, a)]$ | The **TD error** — surprise: how wrong was our old estimate? |
+
+Reading: *"nudge $Q(s, a)$ toward the new better estimate by a fraction $\alpha$ of the surprise."*
+
+##### Worked example — the grid robot
+
+Setup:
+- Robot in $S_1$, takes action `Right`, lands in $S_2$, receives reward $r = 0.5$.
+- $\alpha = 0.1$, $\gamma = 0.9$.
+- Current $Q(S_1, \text{Right}) = 0.2$.
+- Best Q-value from $S_2$: $\max_{a'} Q(S_2, a') = \max(0.0, 1.0, 0.0, -0.3) = 1.0$.
+
+Plug in:
+
+$$
+Q(S_1, \text{Right}) \leftarrow 0.2 + 0.1 \cdot [0.5 + 0.9 \cdot 1.0 - 0.2] = 0.2 + 0.1 \cdot 1.2 = 0.32
+$$
+
+After this single update, $Q(S_1, \text{Right})$ moved from $0.2$ to $0.32$ — incorporating the actual reward seen + the value of where the agent landed.
+
+#### The algorithm — six steps, repeated
+
+```
+1. INITIALIZE     Q(s, a) = 0  for all (s, a)        (or random small values)
+
+2. CHOOSE ACTION  In state s, pick a using exploration strategy
+                  (e.g. ε-greedy — see below)
+
+3. TAKE & OBSERVE Execute a → observe r and next state s'
+
+4. UPDATE Q       Q(s, a) ← Q(s, a) + α[r + γ·max Q(s', a') − Q(s, a)]
+
+5. UPDATE STATE   s ← s'
+
+6. REPEAT 2-5     Until Q-values converge or max episodes reached
+```
+
+#### Exploration vs. exploitation — and why both matter
+
+The agent faces a fundamental dilemma every step:
+
+| Choice | Risk |
+|---|---|
+| **Exploit** — pick the current best-known action | Miss out on better actions you've never tried |
+| **Explore** — try a random/different action | Waste time on actions that turn out to be bad |
+
+If the agent only exploits, it gets stuck on the first decent strategy it finds (a local optimum). If it only explores, it never converges. You need *both*, balanced over time.
+
+##### ε-greedy strategy — the standard solution
+
+With probability $\varepsilon$, take a **random** action. With probability $1 - \varepsilon$, take the **greedy** (current best) action:
+
+$$
+a = \begin{cases}
+\text{random action} & \text{with probability } \varepsilon \\
+\arg\max_{a'} Q(s, a') & \text{with probability } 1 - \varepsilon
+\end{cases}
+$$
+
+| $\varepsilon$ | Behavior |
+|---|---|
+| 1.0 | Pure exploration (uniformly random) |
+| 0.9 | Almost always explore — early training |
+| 0.1 | Mostly exploit, occasional exploration — mid training |
+| 0.0 | Pure greedy exploitation — final policy at deployment |
+
+**Practical pattern:** start with high $\varepsilon$ (~0.9), **decay** it over training to a small value (~0.05). This is "explore aggressively when you know nothing, exploit confidently once you know enough." Other strategies exist (Boltzmann / softmax exploration, UCB) but ε-greedy is the default.
+
+#### Assumptions
+
+| Assumption | Meaning | Failure mode |
+|---|---|---|
+| **Markov property** | Next state and reward depend ONLY on current $(s, a)$ — not on history | If history matters (e.g. in a partially observable environment), Q-values become inconsistent → use POMDP methods or recurrent policies |
+| **Stationary environment** | Transition probabilities and reward function don't change over time | Concept drift breaks learned Q-values; agent must re-train |
+
+#### Off-policy vs on-policy — the key distinction (preview of §15)
+
+Q-Learning is **off-policy**: the update uses $\max_{a'} Q(s', a')$ — the best possible action from $s'$ — regardless of what action the agent will actually take next. The agent learns about the optimal policy while following an exploratory one.
+
+This sets up the contrast with **SARSA** (next section), which uses the action the agent *actually takes* in $s'$ → on-policy.
+
+#### Red-team angles
+
+- **Tabular Q-learning is mostly extinct in production; Deep Q-Networks (DQN) replace the table with a neural net.** This means **every neural-network attack from modules 06–10 applies to RL agents** — adversarial state perturbations (FGSM-style), training-data poisoning, model extraction. Stop-sign attacks against self-driving RL agents are exactly DQN evasion.
+- **Q-table extraction is trivial.** Query the agent in many states (or observe its actions in many states), record the action it picked → infer the argmax of Q for each. With enough queries, you reconstruct the policy. For DQN, similar but use model extraction attacks to recover network weights.
+- **The Markov property assumption is exploitable by introducing history dependence.** If you can craft scenarios where the "right" action depends on past states the agent has forgotten, the Q-values will be systematically wrong → predictable failure modes.
+- **The stationary-environment assumption breaks in adversarial settings by design.** Any active adversary modifying the environment IS non-stationarity. Defender has to detect drift and trigger re-training; attacker exploits the lag between drift and re-train.
+- **Reward hacking is the central RL attack family.** The agent maximizes whatever the reward function says — not the designer's intent. Examples scale from "boat circles to collect power-ups instead of finishing race" to "LLM produces convincing-looking but factually wrong answers because RLHF reward model rewarded confident tone." Module 04/05 jailbreaks often exploit reward-hacking gaps in RLHF training.
+- **ε-greedy is exploitable both ways.** A defender deploying with $\varepsilon > 0$ is stochastic → harder to predict, but each step has ε chance of taking a random possibly-bad action (an attacker can wait for one). A defender at $\varepsilon = 0$ is deterministic → predictable from observed behavior.
+- **Reward poisoning during training corrupts the policy.** If an attacker can inject experiences with crafted $(s, a, r, s')$ tuples into the agent's replay buffer (real-world systems with experience replay), they can shape Q-values arbitrarily. Practical for federated / distributed RL.
+- **Specifically for RLHF:** the reward model is itself a neural network trained on human preference data. If you can poison the preference data (Sybil attacks with fake preference labels) or extract the reward model (Module 07 territory), you can craft inputs that exploit gaps in the reward function the policy was trained against.
+
+**Takeaways:**
+- Q-Learning learns $Q(s, a)$ — expected long-run reward from $(s, a)$ — via the Bellman update: $Q(s, a) \leftarrow Q(s, a) + \alpha[r + \gamma \max_{a'} Q(s', a') - Q(s, a)]$.
+- Optimal policy: $\pi^*(s) = \arg\max_a Q^*(s, a)$.
+- Tabular Q-table doesn't scale; **Deep Q-Networks (DQN)** are the production version → all NN attacks apply.
+- ε-greedy balances exploration vs exploitation; standard pattern is decaying $\varepsilon$ over training.
+- Off-policy: learns about the optimal policy regardless of the action actually chosen (contrasts with SARSA next).
+- Assumes Markov property + stationary environment — both exploitable in adversarial settings.
 
 ---
 
