@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 7
+sections_done: 8
 started: "2026-04-14"
 completed: ""
 ---
@@ -951,7 +951,135 @@ The HTB Module 02 spam exercise uses **Multinomial NB** because email features a
 
 ### 8. Support Vector Machines (SVMs)
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A classifier (and regressor) that finds a decision boundary by **maximizing the margin** — the gap between the boundary and the nearest training point on each side. Conceptually different from everything before: not probabilistic (Naive Bayes), not rule-based (trees), not loss-fitting (logistic). The geometry of *separation* is the whole game.
+
+#### The big idea — margin maximization
+
+Many possible hyperplanes can separate two classes. Which is "best"? SVMs pick the one with **maximum margin** — the widest possible gap between the boundary and the closest training points on either side.
+
+ASCII view in 2D:
+
+```
+ x₂
+  │ ● ●                margin width
+  │  ●                 ←─────────→
+  │ ●─────────────────────────────  upper margin: w·x + b = +1
+  │   ●     ▲
+  │         │ support vectors
+  │     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    decision boundary: w·x + b = 0
+  │     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+  │              ▼
+  │              support vectors
+  │  □─────────────────────────────  lower margin: w·x + b = −1
+  │ □  □
+  │  □
+  └────────────────────────────────→ x₁
+```
+
+The data points sitting *on* the margin lines are called **support vectors**. They alone define the boundary — every other training point could be deleted without changing the model. That's why it's called "support vector" machine.
+
+**Why maximize the margin?** A wider margin tolerates more noise in new data → better generalization. It's also a kind of robustness: an attacker needs a bigger perturbation to push an input across a wider margin. (More on this in red-team angles.)
+
+#### Linear SVM — the math
+
+The hyperplane is parameterized exactly like logistic regression's decision boundary:
+
+$$
+\mathbf{w} \cdot \mathbf{x} + b = 0
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $\mathbf{w}$ | Weight vector — perpendicular to the hyperplane |
+| $\mathbf{x}$ | Input feature vector |
+| $b$ | Bias / intercept — shifts the hyperplane away from origin |
+
+Distance from a point $\mathbf{x}$ to the hyperplane:
+
+$$
+\text{dist}(\mathbf{x}) = \frac{\lvert \mathbf{w} \cdot \mathbf{x} + b \rvert}{\lVert \mathbf{w} \rVert}
+$$
+
+So if we fix the closest points to satisfy $\lvert \mathbf{w} \cdot \mathbf{x} + b \rvert = 1$ (a normalization choice), the **margin width** between the two parallel margin planes is $\frac{2}{\lVert \mathbf{w} \rVert}$. Maximizing the margin = minimizing $\lVert \mathbf{w} \rVert$.
+
+#### The optimization problem
+
+With class labels $y_i \in \{-1, +1\}$, the **hard-margin** SVM solves:
+
+$$
+\begin{aligned}
+\text{minimize} \quad & \frac{1}{2} \lVert \mathbf{w} \rVert^2 \\
+\text{subject to} \quad & y_i (\mathbf{w} \cdot \mathbf{x}_i + b) \geq 1 \quad \text{for all } i
+\end{aligned}
+$$
+
+Reading the constraint: for every training point, the score $\mathbf{w} \cdot \mathbf{x}_i + b$ should have the same sign as the label $y_i$ AND be at least 1 in magnitude → the point is on the correct side of the margin, not just the boundary.
+
+The objective $\frac{1}{2} \lVert \mathbf{w} \rVert^2$ is **convex**, so there's a unique global optimum. Solved with quadratic programming.
+
+In practice, real data isn't perfectly separable, so the **soft-margin** SVM adds slack variables $\xi_i \geq 0$ that let some points violate the margin (with a penalty $C$ for each violation). This is what `sklearn.svm.SVC` actually trains.
+
+#### Non-linear SVMs — the kernel trick
+
+What if the data isn't linearly separable in its original space? Lift it into a higher-dimensional space where it *is* separable.
+
+```
+Original 2D space (not linearly separable):
+                                        Lifted 3D space (separable):
+  ●   ○   ●                                       ●
+○   ●   ○   ●                                ●        ●
+  ●   ○   ●           ──── kernel ────►      ─────────────  ← linear hyperplane here
+○   ●   ○   ●                                  ○      ○
+  ●   ○   ●                                       ○
+                                                
+(no straight line works)               (a flat plane separates them)
+```
+
+The "trick" is that you don't have to actually compute the high-dimensional coordinates. You only need the **dot product** between mapped points, and a **kernel function** $K(\mathbf{x}_i, \mathbf{x}_j)$ computes that dot product directly in the original space:
+
+$$
+K(\mathbf{x}_i, \mathbf{x}_j) = \phi(\mathbf{x}_i) \cdot \phi(\mathbf{x}_j)
+$$
+
+where $\phi$ is the implicit mapping. Even when $\phi$ maps to *infinite* dimensions, $K$ stays computable.
+
+Common kernels:
+
+| Kernel | Formula | Implicit mapping | Use when |
+|---|---|---|---|
+| **Linear** | $K(\mathbf{x}_i, \mathbf{x}_j) = \mathbf{x}_i \cdot \mathbf{x}_j$ | Identity (no lift) | Data is already linearly separable; high-dim sparse text features |
+| **Polynomial** | $K(\mathbf{x}_i, \mathbf{x}_j) = (\mathbf{x}_i \cdot \mathbf{x}_j + c)^d$ | Polynomial features up to degree $d$ | Mild non-linearity; need interaction terms |
+| **RBF (Gaussian)** | $K(\mathbf{x}_i, \mathbf{x}_j) = \exp(-\gamma \lVert \mathbf{x}_i - \mathbf{x}_j \rVert^2)$ | Infinite-dimensional Gaussian basis | Default for non-linear data — most flexible, most popular |
+| **Sigmoid** | $K(\mathbf{x}_i, \mathbf{x}_j) = \tanh(\alpha \mathbf{x}_i \cdot \mathbf{x}_j + c)$ | Sigmoid-shaped boundaries | Rare; behaves like a 1-layer neural net |
+
+**RBF is the workhorse.** $\gamma$ controls how "local" the kernel is — small $\gamma$ → smooth wide boundaries, large $\gamma$ → tight overfit-prone boundaries.
+
+#### Assumptions
+
+| Assumption | What it means |
+|---|---|
+| **No distributional assumption** | Doesn't require Gaussian features or normal residuals (unlike linear regression) |
+| **Handles high dimensionality** | Works well even when $d > N$ (more features than samples); great for text |
+| **Robust to outliers** | Margin-based, not loss-based across all points; soft-margin's $C$ controls outlier tolerance |
+
+#### Red-team angles — margin = robustness, support vectors = leaks
+
+- **Linear SVM = same boundary geometry as logistic regression.** $\mathbf{w} \cdot \mathbf{x} + b = 0$ is the same hyperplane. Gradient direction for evasion is just $\mathbf{w}$. **DeepFool (Module 09) handles this in one closed-form step** — same attack as for logistic.
+- **The margin IS the adversarial robustness.** To flip a prediction, an attacker must perturb $\mathbf{x}$ enough to cross the boundary — minimum perturbation = $\frac{1}{\lVert \mathbf{w} \rVert}$ for points outside the margin. Wider margin → bigger required perturbation. This is *the* connection between classical SVM theory and modern adversarial defense research ("margin-based certified robustness").
+- **Support vectors are training points → membership inference jackpot.** Only the support vectors define the model. If an attacker can identify which inputs are support vectors (e.g. by perturbing inputs and watching which produce decision-boundary changes), they've identified specific training samples. This is a documented MIA against SVMs and a precursor to Module 11's shadow-model attacks.
+- **Kernel trick = embedding spaces.** The idea of "lift inputs into a higher-dim space where they're easier to work with" is the conceptual ancestor of every embedding layer in deep learning. When Module 04 talks about LLM embedding spaces and Module 09 attacks gradients in feature space, the mental model is the same.
+- **RBF kernels can defeat naive evasion attacks** — the boundary is non-linear and locally curved, so a one-shot linear perturbation (like FGSM) often doesn't transfer cleanly. But iterative attacks (I-FGSM) handle this fine.
+- **Soft-margin's $C$ parameter is exploitable.** Large $C$ = small margin = more sensitive to outliers = easier to poison the boundary with a few mislabeled points (Module 06 label-flipping). Small $C$ = wide margin = harder to attack but possibly underfit.
+- **SVMs are popular for malware classification** with engineered byte/PE features. Attacks on PE-feature SVMs (Wagner & Soto, 2002 onward) are an entire subfield. Module 02 uses Random Forests instead, but the techniques transfer.
+
+**Takeaways:**
+- SVM finds the maximum-margin hyperplane. Boundary defined by **support vectors** — the closest training points.
+- Linear SVM: minimize $\frac{1}{2} \lVert \mathbf{w} \rVert^2$ subject to $y_i(\mathbf{w} \cdot \mathbf{x}_i + b) \geq 1$. Margin width = $\frac{2}{\lVert \mathbf{w} \rVert}$.
+- Non-linear SVMs use the **kernel trick** to compute high-dim dot products without high-dim coordinates. RBF is the default.
+- Margin maximization is the classical analog of modern adversarial-robustness research.
+- Support vectors leak training data → MIA-friendly.
 
 ---
 
