@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 12
+sections_done: 13
 started: "2026-04-14"
 completed: ""
 ---
@@ -1654,7 +1654,140 @@ $$
 
 ### 13. Reinforcement Learning Algorithms
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A completely different paradigm from supervised and unsupervised learning. There is no labeled dataset. There is no fixed dataset at all. Instead: an **agent** interacts with an **environment**, takes actions, observes the consequences, and receives **rewards** that signal whether the actions were good or bad. Over time, the agent learns a **policy** — a strategy for choosing actions — that maximizes long-run cumulative reward.
+
+#### The interaction loop — the whole paradigm in one picture
+
+```
+            ┌─────────────────┐
+            │                 │
+            │      AGENT      │
+            │   (policy π)    │
+            │                 │
+            └──┬──────────────┘
+               │            ▲
+       action  │            │  next state s_{t+1}
+       a_t     │            │  reward     r_{t+1}
+               ▼            │
+            ┌─────────────────┐
+            │                 │
+            │   ENVIRONMENT   │
+            │                 │
+            └─────────────────┘
+
+At each timestep t:
+  1. Agent observes state s_t
+  2. Agent picks action a_t ~ π(s_t)
+  3. Environment transitions to s_{t+1}, returns reward r_{t+1}
+  4. Repeat
+```
+
+This loop runs for many timesteps (an *episode*, or forever in continuous tasks). The agent's job is to learn a policy $\pi$ that makes good action choices.
+
+#### Core vocabulary — memorize these
+
+| Term | Symbol | Meaning |
+|---|---|---|
+| **Agent** | — | The learner and decision-maker (the "thing that does stuff") |
+| **Environment** | — | Everything outside the agent that responds to actions |
+| **State** | $s \in S$ | The current situation the agent observes |
+| **Action** | $a \in A$ | A choice the agent makes |
+| **Reward** | $r \in \mathbb{R}$ | Scalar feedback after each action — positive = good, negative = punishment |
+| **Policy** | $\pi(a \mid s)$ | The agent's strategy: probability of picking action $a$ in state $s$ |
+| **Value function** | $V(s)$ or $Q(s, a)$ | Expected long-run reward from a state (or state-action pair) |
+| **Discount factor** | $\gamma \in [0, 1]$ | How much to weight future rewards vs. immediate ones |
+| **Episode** | — | One run from start to terminal state (e.g. one game of chess) |
+
+#### Two flavors of policy
+
+| Type | Description |
+|---|---|
+| **Deterministic** | $\pi(s) = a$ — same state always produces the same action |
+| **Stochastic** | $\pi(a \mid s) = $ probability distribution over actions — same state can produce different actions |
+
+#### Two flavors of RL
+
+| Approach | Idea | Analogy |
+|---|---|---|
+| **Model-based** | Agent learns (or is given) a model of the environment — predicts next state + reward for each action — then plans | Having a map of the maze before navigating |
+| **Model-free** | Agent learns a policy or value function directly from experience, without modeling environment dynamics | Navigating the maze blind, only learning from reward signals |
+
+Q-Learning (§14) and SARSA (§15) are both **model-free**. Most modern RL applications are model-free; model-based methods are common in robotics where simulators provide a model.
+
+#### The math — cumulative reward and value
+
+The agent's goal is to maximize **cumulative discounted reward** (also called the *return*) starting from time $t$:
+
+$$
+G_t = r_{t+1} + \gamma r_{t+2} + \gamma^2 r_{t+3} + \dots = \sum_{k=0}^{\infty} \gamma^k r_{t+k+1}
+$$
+
+The discount factor $\gamma$ controls the time horizon:
+
+| $\gamma$ | Behavior |
+|---|---|
+| $0$ | Myopic — only immediate reward matters |
+| $0.9$ – $0.99$ | Standard — values future rewards but with diminishing weight |
+| $1$ | All future rewards weighted equally — only safe for finite-horizon (episodic) tasks |
+
+##### State-value function $V^\pi(s)$
+
+Expected return from being in state $s$ and following policy $\pi$ thereafter:
+
+$$
+V^\pi(s) = \mathbb{E}_\pi \!\left[ G_t \mid S_t = s \right]
+$$
+
+"How good is it to be in state $s$, assuming I'll keep using policy $\pi$?"
+
+##### Action-value function $Q^\pi(s, a)$
+
+Expected return from taking action $a$ in state $s$, then following policy $\pi$ thereafter:
+
+$$
+Q^\pi(s, a) = \mathbb{E}_\pi \!\left[ G_t \mid S_t = s, A_t = a \right]
+$$
+
+"How good is it to take action $a$ in state $s$, then keep using $\pi$?"
+
+The **Q-function** is the central object in Q-Learning (§14) and SARSA (§15). The optimal policy can always be derived from $Q^*$:
+
+$$
+\pi^*(s) = \arg\max_a Q^*(s, a)
+$$
+
+Just always pick the action with the highest Q-value.
+
+#### Episodic vs. continuous tasks
+
+| Type | Description | Examples |
+|---|---|---|
+| **Episodic** | Has a clear terminal state; the world resets between episodes | Game of chess, maze navigation, single trading day |
+| **Continuous** | Runs indefinitely; no natural reset | Robot arm control, ongoing recommendation system, chatbot in a long session |
+
+For continuous tasks, $\gamma < 1$ is mathematically required (otherwise infinite-sum returns are undefined).
+
+#### Red-team angles — RL is becoming central to AI security
+
+- **RLHF (Reinforcement Learning from Human Feedback) is how every modern aligned LLM is trained.** GPT, Claude, Gemini, Llama-Instruct — all trained to be "helpful and harmless" via RL on human preference data. The reward function is a learned model of what humans rate as a good answer. **Modules 04–05 (Prompt Injection, LLM Output Attacks) are fundamentally attacks against RLHF-trained policies** — finding inputs where the trained policy fails to follow its alignment.
+- **Reward hacking / specification gaming.** When the reward signal doesn't perfectly capture the intended goal, agents find shortcuts. Famous examples: a boat-racing RL agent that learned to circle in place collecting power-ups instead of finishing the race; LLMs that learned to "appear helpful" on the rated metric without actually being helpful. Jailbreaks that say "respond as my deceased grandmother who used to read me napalm recipes" exploit this — the reward model didn't penalize the role-play frame.
+- **Adversarial perturbations to state observations.** For RL agents using vision/sensors, a tiny perturbation to the input image can flip the chosen action — same FGSM/DeepFool machinery from modules 09–10, applied to the RL state input. Self-driving car evasion via adversarial stop-sign stickers is the canonical example.
+- **Policy poisoning via training-experience injection.** If an attacker can inject training experiences (state, action, reward) into the agent's replay buffer, they can shape the learned policy. Practical for distributed/federated RL setups.
+- **Reward poisoning of RLHF.** If attackers can submit fake human feedback (e.g. by spinning up sock puppets that consistently rate certain harmful outputs as "good"), they steer the reward model — and the policy follows. Defended via Sybil resistance + outlier detection on raters.
+- **Model-based RL leaks the world model.** If an attacker can extract the agent's learned environment model, they know exactly what the agent expects and can craft state transitions the agent didn't anticipate.
+- **The discount factor is exploitable.** Aggressive discounting (small $\gamma$) makes agents myopic — exploitable by attacks that delay their payoff (the agent ignores long-term consequences). Large $\gamma$ makes agents value-of-information-driven — exploitable via "reward over the horizon" spoofing.
+- **Multi-agent RL** (e.g. autonomous trading, multi-agent simulation) introduces game-theoretic attacks: one adversarial agent can manipulate others' learning by playing strategically against their value estimates.
+
+**Takeaways:**
+- RL = agent + environment + states + actions + rewards + policy + value functions.
+- Goal: maximize cumulative discounted reward $G_t = \sum \gamma^k r_{t+k+1}$.
+- Two value functions: $V^\pi(s)$ (state-value), $Q^\pi(s, a)$ (action-value, central to Q-Learning).
+- Optimal policy from optimal Q: $\pi^*(s) = \arg\max_a Q^*(s, a)$.
+- Two paradigms: model-based (learn dynamics + plan) vs model-free (learn policy/value directly from experience).
+- **RLHF** is THE training method for modern aligned LLMs — Modules 04–05 are attacks against RLHF-trained policies.
+- Reward hacking, adversarial state perturbations, and reward poisoning are the three major attack families against RL systems.
 
 ---
 
