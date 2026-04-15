@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 11
+sections_done: 12
 started: "2026-04-14"
 completed: ""
 ---
@@ -1497,7 +1497,158 @@ Standard rule: pick the smallest $k$ such that cumulative $\sum \lambda_i / \sum
 
 ### 12. Anomaly Detection
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+Identifies data points that deviate significantly from "normal" patterns. The defensive ML primitive: every IDS, fraud detector, malware behavior monitor, and SOC alert pipeline is doing some form of anomaly detection. **For red teamers, this is the section about everything you're trying to stay under the threshold of.**
+
+#### Three types of anomalies — three attack strategies
+
+| Type | Definition | Security example | Attacker counter |
+|---|---|---|---|
+| **Point** | Single point looks weird in isolation | Sudden 10× spike in outbound bandwidth from one host | Throttle the action to look normal point-by-point |
+| **Contextual** | Looks weird *given context* but not absolutely | A login at 3 a.m. for a 9-to-5 employee | Time the action to a legitimate context window |
+| **Collective** | A group of points is weird together, individuals look fine | 50 different IPs each making 1 login attempt within a minute (low-and-slow brute force) | Distribute the attack across many actors so no individual is flagged |
+
+The three attack strategies on the right side ARE the canonical anomaly-evasion playbook. Real attackers combine them.
+
+#### Three approaches — three defense families
+
+| Approach | How it defines "normal" | Example methods |
+|---|---|---|
+| **Statistical** | Assumes data follows a known distribution (often Gaussian); anomalies = deviations from it | Z-score, modified Z-score, boxplot/IQR, 3-sigma rule |
+| **Clustering-based** | Normal points cluster together; anomalies are far from clusters or in tiny ones | K-Means + distance-to-centroid threshold, DBSCAN noise points |
+| **ML-based** | Learn a model of "normal" data, score new points against it | One-Class SVM, Isolation Forest, Local Outlier Factor (LOF), autoencoders |
+
+The three ML-based methods deserve their own treatment.
+
+#### One-Class SVM — "draw a fence around normal"
+
+Recall §8: SVMs find a maximum-margin hyperplane between two classes. **One-Class SVM** trains on *only the normal class* and finds a hyperplane (or curved boundary, with a kernel) that *encloses* the normal data tightly — anything outside is an anomaly.
+
+```
+ x₂                       ╭──────────╮
+  │     normal data ●●●●  │  ●●●●●  │   ← boundary learned by One-Class SVM
+  │                  ●●●● │ ●●●●●●  │       (with RBF kernel: a curved enclosure)
+  │                       │  ●●●    │
+  │                       ╰──────────╯
+  │
+  │   ✕ anomaly (outside)
+  │
+  └────────────────────────────────────→ x₁
+```
+
+Same kernel trick from §8 (linear, polynomial, RBF, sigmoid) applies. RBF is again the default for non-linear normal regions.
+
+**Bypass:** craft inputs that fall *inside* the boundary while still carrying the malicious payload. The decision boundary is the attack target — same geometry as supervised SVM evasion, just with different training labels.
+
+#### Isolation Forest — "anomalies isolate quickly"
+
+A clever inversion of the usual "model normal, score anomalies" approach. Instead of modeling normal, **isolate** every point by recursive random splitting and observe how *deep* in the tree each point ends up.
+
+The intuition: anomalies are *few* and *different* → they get isolated faster (shorter path lengths in the random tree). Normal points are *many* and *similar* → harder to isolate (longer paths).
+
+##### The algorithm
+
+1. Build many isolation trees, each from random subsamples.
+2. At each node: pick a random feature, pick a random split value within that feature's range, partition the data.
+3. Recurse until each point is alone in its leaf.
+4. Compute the average path length $E(h(x))$ across all trees.
+5. Compute the anomaly score:
+
+$$
+s(x) = 2^{-\frac{E(h(x))}{c(n)}}
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $E(h(x))$ | Average path length to isolate $x$ across all trees |
+| $c(n)$ | Average path length of unsuccessful BST search with $n$ samples — normalization factor |
+| $n$ | Sample size |
+
+| Score | Interpretation |
+|---|---|
+| Close to **1** | Likely anomaly (short path → easy to isolate) |
+| Close to **0.5** | Probably normal |
+| Close to **0** | Definitely normal (long path → blends with the crowd) |
+
+**Why it works for security data:** linear in time, scales to high dimensions, doesn't need distance metrics → bypasses the curse of dimensionality (§9). Sklearn's `IsolationForest` is a common production choice.
+
+**Bypass:** make your malicious sample *not stand out on any single feature* — if every feature is within the bulk of normal values, no random split can isolate you quickly. This is why "blend in" tactics work.
+
+#### Local Outlier Factor (LOF) — "anomalies are in low-density neighborhoods"
+
+A density-based approach. For each point $p$:
+1. Find its $k$ nearest neighbors.
+2. Compute its **local reachability density** — roughly "how dense is the neighborhood around $p$?".
+3. Compare $p$'s density to the average density of its neighbors.
+
+If $p$'s density is *much lower* than its neighbors' (i.e., $p$ is sitting in a sparse region while its neighbors are in a dense region), it's an outlier.
+
+##### The math
+
+**Local reachability density (LRD)** of point $p$:
+
+$$
+\text{lrd}(p) = \frac{1}{\frac{1}{k}\sum_{o \in N_k(p)} \text{reach\_dist}(p, o)}
+$$
+
+where $\text{reach\_dist}(p, o) = \max(\text{k-distance}(o), \text{dist}(p, o))$. (The "reachability distance" smooths things — points in dense regions can't be reached arbitrarily close to one another.)
+
+**LOF score** for $p$:
+
+$$
+\text{LOF}(p) = \frac{\frac{1}{k}\sum_{o \in N_k(p)} \text{lrd}(o)}{\text{lrd}(p)}
+$$
+
+| LOF value | Interpretation |
+|---|---|
+| ≈ 1 | Point has same density as neighbors → normal |
+| > 1 | Point is in a *sparser* region than its neighbors → outlier |
+| ≫ 1 (e.g. > 1.5–2) | Strong outlier |
+
+**Why use LOF over Isolation Forest or One-Class SVM?** LOF handles datasets with **varying density** — clusters of different tightness are common in real data, and LOF doesn't assume a single global density.
+
+**Bypass:** insert your malicious sample into a *dense* part of feature space — surround it with normal-looking points (real or synthetic) so its local density matches its neighbors. This is sometimes called a **mimicry attack**.
+
+#### Assumptions — how each method can fail
+
+| Assumption | Method | Failure mode |
+|---|---|---|
+| Normal follows a known distribution (e.g. Gaussian) | Statistical (z-score) | Real data has heavy tails, multi-modality → many false positives or false negatives |
+| Normal data clusters tightly | Clustering-based | Normal data with multiple sub-populations → some "normal" sub-clusters get flagged |
+| Anomalies are rare and few | Isolation Forest, all of them | If anomalies are a sizable fraction (say > 20%), they form their own dense regions and stop looking anomalous |
+| Local density matters | LOF | Slow on large datasets; needs careful $k$ selection |
+
+#### Red-team angles — this is the playbook
+
+- **Module 02's NSL-KDD Network Anomaly Detection** uses a **Random Forest** (supervised, since NSL-KDD is labeled) but the underlying problem framing is identical: classify "normal" vs "attack" traffic. The anomaly-detection vocabulary here transfers directly.
+- **The three anomaly types map directly to attack tradecraft:**
+  - **Point evasion** = throttling + packet-size obfuscation. Don't make any single observation look weird.
+  - **Contextual evasion** = "live off the land" + timing. Use legitimate tools, act during business hours, blend with baseline.
+  - **Collective evasion** = botnet distribution + low-and-slow. Distribute the campaign so no single source crosses any threshold.
+- **Each detection algorithm has a specific bypass:**
+
+| Detector | Bypass technique |
+|---|---|
+| Z-score / statistical | Keep all feature values within ±3σ of the per-feature mean |
+| One-Class SVM | Stay inside the learned boundary — same geometry as supervised SVM evasion |
+| Isolation Forest | Don't stand out on any *single* feature; ensure every feature's value is in the bulk of normal range |
+| LOF | Mimicry — surround your malicious activity with synthetic normal-looking activity to raise local density |
+| Clustering-based (K-Means + threshold) | Stay close to the nearest centroid (the "normal-shaping" attack from §10) |
+
+- **Adversarial ML against anomaly detectors is a documented subfield.** Papers like "Adversarial Examples Against Anomaly Detection" (and many follow-ups) formalize the bypasses above as constrained optimization problems: minimize anomaly score subject to the malicious objective being achieved.
+- **Poisoning the "normal" training set** (Module 06's data attacks) is the meta-bypass. If an attacker can inject malicious-looking traffic into the *training* data labeled as normal, the detector will never flag that pattern at inference time. This is why anomaly detectors trained on production data are fundamentally fragile.
+- **Detector ensembles raise the bar.** Real defenders stack One-Class SVM + Isolation Forest + LOF + statistical thresholds and require multiple to fire. Attacker must bypass *all* simultaneously → harder optimization problem (though not impossible — multi-detector evasion has its own literature).
+- **Concept drift = a free attack vector.** Normal traffic distributions change over time (new services, new users, holiday patterns); detectors retrained on drifted data slowly become less sensitive. Attackers exploit drift windows to introduce new techniques.
+- **Path length in Isolation Forest is information-leaky.** Querying the model and observing scores reveals which features the model considers "isolating" → attackers can probe to learn the feature distribution.
+
+**Takeaways:**
+- Three anomaly types: Point (single-point), Contextual (situational), Collective (group). Each maps to a specific attack strategy.
+- Three detection approaches: Statistical, Clustering-based, ML-based.
+- Three ML-based methods to know: **One-Class SVM** (draw a fence around normal), **Isolation Forest** (anomalies isolate quickly, score = $2^{-E(h(x))/c(n)}$), **LOF** (anomalies have lower density than neighbors).
+- Each detector has a specific bypass — internalize the table above; this is the core anomaly-evasion playbook.
+- Module 02 builds a supervised classifier on NSL-KDD, but the framing is identical.
+- Poisoning the training "normal" set (Module 06) is the meta-bypass; ensemble detection raises the bar.
 
 ---
 
