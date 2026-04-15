@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 22
+sections_done: 23
 started: "2026-04-14"
 completed: ""
 ---
@@ -3312,7 +3312,177 @@ Each token is a separate forward pass. The apparent coherence comes from the mod
 
 ### 23. Diffusion Models
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-15
+
+The architecture behind modern image generation (Stable Diffusion, DALL-E 2/3, Midjourney, Imagen, SDXL). A generative model (§21) that learns to **reverse a noise process** — start from pure noise and denoise step-by-step into a coherent image.
+
+Core insight: rather than learning to generate an image directly (hard), train a model to denoise an image slightly (easy). Apply that denoising function many times starting from pure noise → end up with a generated image.
+
+#### The two-process framework
+
+```
+FORWARD PROCESS (training — add noise step by step)
+
+ x₀ ──ε──▶ x₁ ──ε──▶ x₂ ──ε──▶ … ──ε──▶ x_T
+(real image)                           (pure Gaussian noise)
+
+
+REVERSE PROCESS (generation — learned, step by step)
+
+ x₀ ◀──θ── x₁ ◀──θ── x₂ ◀──θ── … ◀──θ── x_T
+(generated image)                      (start from pure noise)
+                       ↑
+                 denoising network
+                 predicts noise, subtracts it
+```
+
+| Process | Direction | Purpose |
+|---|---|---|
+| **Forward** (noising) | $x_0 \to x_T$ | Known, hand-designed — just add calibrated Gaussian noise at each step |
+| **Reverse** (denoising) | $x_T \to x_0$ | Learned — train a neural net to undo one step of noise |
+
+#### Forward process — adding noise
+
+At each step $t$, add Gaussian noise according to a **variance schedule** $\beta_t$:
+
+$$
+q(x_t \mid x_{t-1}) = \mathcal{N}(x_t; \sqrt{1 - \beta_t} \, x_{t-1}, \, \beta_t I)
+$$
+
+In plain English: $x_t$ = slightly-scaled-down $x_{t-1}$ plus Gaussian noise with variance $\beta_t$. Typical $T = 1000$ steps; by $x_T$ the signal is destroyed — just noise.
+
+#### Noise schedule
+
+The sequence $\beta_1, \beta_2, \dots, \beta_T$ is called the **noise schedule**. A simple linear choice:
+
+$$
+\beta_t = \beta_{\min} + \frac{t}{T}(\beta_{\max} - \beta_{\min})
+$$
+
+Typical: $\beta_{\min} = 10^{-4}$, $\beta_{\max} = 0.02$, $T = 1000$. Non-linear schedules (cosine, quadratic) often perform better because they add noise more gently early on. Modern samplers (DDIM, DPM-Solver) can skip timesteps to make generation much faster.
+
+#### Reverse process — learning to denoise
+
+The model learns a **denoising network** $\epsilon_\theta(x_t, t)$ that predicts the noise added at step $t$. At inference, we subtract predicted noise to approximately recover $x_{t-1}$:
+
+$$
+p_\theta(x_{t-1} \mid x_t) = \mathcal{N}(x_{t-1}; \mu_\theta(x_t, t), \Sigma_\theta(x_t, t))
+$$
+
+In practice: $\mu_\theta$ is computed from the predicted noise $\epsilon_\theta$ via a closed-form expression; $\Sigma_\theta$ is often fixed to $\beta_t I$.
+
+#### Training objective — MSE on predicted noise
+
+Simple in form. Sample a training image $x_0$, pick a random timestep $t$, add noise, ask the network to predict the noise:
+
+$$
+\mathcal{L} = \mathbb{E}_{x_0, \epsilon, t} \left[ \lVert \epsilon - \epsilon_\theta(x_t, t) \rVert^2 \right]
+$$
+
+That's it. Mean squared error between actual noise $\epsilon$ and predicted noise $\epsilon_\theta$. Train for millions of steps across billions of images.
+
+#### The denoising network — typically a U-Net
+
+The denoising network is almost always a **U-Net** — a convolutional architecture with skip connections that lets it process the image at multiple scales simultaneously. Key properties:
+- **Input:** $x_t$ (noisy image) + timestep embedding + text conditioning (if applicable).
+- **Output:** predicted noise $\hat{\epsilon}$ with the same shape as $x_t$.
+- **Symmetric encoder-decoder** with skip connections — preserves fine detail while also capturing coarse structure.
+
+Some modern diffusion models (DiT — Diffusion Transformer) replace the U-Net with a transformer, but U-Net remains the default for most open-weights models.
+
+#### Text-to-image — the conditioning mechanism
+
+The exciting part. To turn a pure unconditional "generate any image" model into "generate an image that matches this prompt", we **condition** the denoising network on a text embedding.
+
+```
+  "a cat in a hat"
+          │
+          ▼
+   [Text encoder:
+    CLIP / T5 / etc.]
+          │
+          ▼
+    text embedding ────────────────┐
+                                   │
+                                   │  (injected into each denoising step)
+    x_t (noisy image) ─────────────┼──▶ [Denoising U-Net] ──▶ predicted noise ε̂
+                                   │                              │
+                                   └──────────────────────────────┤
+                                                                  ▼
+                                                   subtract → x_{t-1}
+```
+
+The text embedding is usually injected via **cross-attention** layers inside the U-Net — each spatial position of the image attends to the text embedding, letting image content align with the prompt's semantics.
+
+The **text encoder** is frequently CLIP (from OpenAI's paired image-text model) — the same model that computes joint text/image embeddings in a shared space. This is why "CLIP embedding" keeps coming up in image-generation discussions.
+
+#### Classifier-free guidance — the "turn up the prompt strength" knob
+
+At inference, the model runs *twice* per step:
+1. Conditional: with the text prompt → predicts $\epsilon_\theta(x_t, t, \text{prompt})$.
+2. Unconditional: without the text prompt → predicts $\epsilon_\theta(x_t, t, \varnothing)$.
+
+Then combine with a guidance scale $w$:
+
+$$
+\hat{\epsilon} = \epsilon_\theta(x_t, t, \varnothing) + w \cdot \left[ \epsilon_\theta(x_t, t, \text{prompt}) - \epsilon_\theta(x_t, t, \varnothing) \right]
+$$
+
+| $w$ | Effect |
+|---|---|
+| 1 | Equivalent to ignoring the prompt (unconditional) |
+| 3–7 | Typical range — prompt-faithful but still diverse |
+| 15+ | Over-saturated, cartoonish, strongly prompt-adherent |
+
+This is a user-facing parameter in Stable Diffusion (`guidance_scale` or `cfg_scale`).
+
+#### Sampling — the generation loop
+
+```
+1. Start with x_T ~ N(0, I)  (pure random noise)
+
+2. For t = T, T-1, ..., 1:
+       ε̂ = denoising_network(x_t, t, text_embedding)
+       x_{t-1} = (x_t - some_function_of_ε̂) + small_random_noise
+
+3. Return x_0  (the generated image)
+```
+
+Classic DDPM uses all $T = 1000$ steps. Faster samplers (DDIM, DPM++, Euler, Heun) use 20–50 steps with minimal quality loss — they approximate the continuous-time stochastic differential equation underlying diffusion.
+
+#### Assumptions
+
+| Assumption | Meaning | Failure mode |
+|---|---|---|
+| **Markov property** | Each step depends only on the immediately prior step | If the true data requires long-range dependencies, single-step denoising may lose coherence → most modern diffusion models use U-Nets that see the whole image, bypassing this concern |
+| **Static data distribution** | Training set is fixed; model learns its distribution | Dataset drift between training and deployment → outputs become stale |
+| **Smoothness** | Small input changes produce small output changes | Not strict; helps training stability |
+
+#### Red-team angles
+
+- **Training-data extraction from diffusion models is a documented privacy attack.** Carlini et al. 2023 ("Extracting Training Data from Diffusion Models") showed Stable Diffusion v1.5 regurgitates specific training images verbatim when prompted appropriately — including copyrighted images, faces of real people, and distinctive artwork. Mechanism: overfit samples have near-zero denoising loss, making them easier to recover via careful prompting.
+- **Safety filters on text-to-image are routinely bypassed.** Commercial services (DALL-E, Midjourney) run filters on prompts + generated images. Bypasses include:
+  - **Prompt rephrasing** — request the content using synonyms, obscure language, or multilingual substitution.
+  - **Prompt-attribute decoupling** (also flagged in §21) — don't name the target identity; rely on latent correlations (e.g. "the 46th president" instead of the person's name).
+  - **Adversarial prompts** — prompts with embedded control tokens or rare subword combinations that confuse the filter classifier while still triggering the desired generation.
+  - **Post-generation perturbation** — generate close-to-safe content, then edit slightly using tools like inpainting to cross the threshold.
+- **Deepfake generation.** Diffusion models enable photorealistic face generation at scale. Fine-tuning on a small set of target-person images (via Dreambooth, LoRA, textual inversion) produces models that generate arbitrary content featuring that person. This is the primary deepfake pipeline today.
+- **Textual inversion / concept injection as an attack.** Train a small embedding (a "token" in the vocabulary) to represent a malicious concept, trademark, or person. Attach it to a legitimate model. Now prompts using that token produce the concept — even though the concept isn't explicitly in the model's weights. Detection is very hard because only the new token embedding differs from the base model.
+- **Jailbreaking text-to-image for harmful content.** Generated content of illegal material (CSAM, weapons designs, violent scenes) is a continuing problem. Multi-pronged approach attackers use: carefully-crafted prompts to bypass safety classifiers + CLIP-based prompt sanitizers + final-image content classifiers.
+- **Adversarial perturbations against diffusion models exist** but are harder than against classifiers. Notable: adversarial attacks that make a generator produce specific images from near-arbitrary prompts (prompt-agnostic attacks). Less mature than attacks on classifiers.
+- **Membership inference on diffusion models.** Works via the denoising loss signature: training images have lower per-step denoising loss than unseen images. Straightforward shadow-model setup from Module 11 generalizes.
+- **Watermarking and provenance attacks.** Modern diffusion services embed invisible watermarks (Tree-Rings, Gaussian Shading) to mark generated content. These are being actively attacked — removal via image-editing pipelines is documented. The arms race mirrors classical steganography.
+- **CLIP text-encoder attacks transfer.** If an attacker can craft text whose CLIP embedding is close to a target concept, that text acts as a prompt for that concept — even in other models using the same CLIP text encoder. This enables cross-model prompt transfer.
+- **Inference-time resource exhaustion.** Large diffusion models are expensive ($0.01–$0.10 per image on commercial APIs). Attackers can craft prompts that trigger maximum iterations / maximum guidance / maximum resolution to burn compute budget (a DoS pattern).
+
+**Takeaways:**
+- Diffusion models learn to reverse a gradual noising process: add noise progressively during training, train a network to predict that noise, generate by starting from pure noise and denoising step by step.
+- Forward: $q(x_t \mid x_{t-1}) = \mathcal{N}(\sqrt{1 - \beta_t} x_{t-1}, \beta_t I)$. Reverse: learned $p_\theta(x_{t-1} \mid x_t)$.
+- Training loss is MSE on predicted vs actual noise.
+- Denoising network is typically a U-Net (sometimes a transformer in newer models).
+- Text conditioning via cross-attention on text embeddings (CLIP / T5) → text-to-image generation.
+- Classifier-free guidance scales prompt adherence; $w = 7$ typical.
+- Main attack surfaces: training-data extraction (Carlini et al. 2023), safety-filter bypass, deepfake generation, textual inversion backdoors, watermark removal, resource exhaustion.
 
 ---
 
