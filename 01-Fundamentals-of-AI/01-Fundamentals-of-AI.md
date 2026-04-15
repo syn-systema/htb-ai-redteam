@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 14
+sections_done: 18
 started: "2026-04-14"
 completed: ""
 ---
@@ -1934,25 +1934,664 @@ This sets up the contrast with **SARSA** (next section), which uses the action t
 
 ### 15. SARSA (State-Action-Reward-State-Action)
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A model-free RL algorithm that's almost identical to Q-Learning — same Q-table, same Bellman-style update — except for **one small change** that fundamentally alters the agent's behavior. Where Q-Learning is **off-policy** and aggressive, SARSA is **on-policy** and conservative.
+
+The name comes from the 5-tuple it operates on: **S**tate, **A**ction, **R**eward, next **S**tate, next **A**ction.
+
+#### The single-character difference — the update rule
+
+Compare side-by-side:
+
+| Algorithm | Update rule |
+|---|---|
+| **Q-Learning** | $Q(s, a) \leftarrow Q(s, a) + \alpha[r + \gamma \, \mathbf{\max_{a'} Q(s', a')} - Q(s, a)]$ |
+| **SARSA** | $Q(s, a) \leftarrow Q(s, a) + \alpha[r + \gamma \, \mathbf{Q(s', a')} - Q(s, a)]$ |
+
+Q-Learning uses $\max_{a'} Q(s', a')$ — the *best possible* action from $s'$, regardless of what the agent will actually do.
+SARSA uses $Q(s', a')$ — the value of the action the agent **actually picks** in $s'$ using its current (potentially exploratory) policy.
+
+That single change has big consequences:
+- Q-Learning learns "what's the value of acting optimally from now on" — assumes future-perfect behavior.
+- SARSA learns "what's the value of acting *the way I'm currently acting*" — including exploration mistakes.
+
+#### The algorithm — six steps (note the extra a' choice)
+
+```
+1. INITIALIZE      Q(s, a) = 0  for all (s, a)
+
+2. CHOOSE a        In state s, pick a using ε-greedy
+
+3. TAKE & OBSERVE  Execute a → observe r, next state s'
+
+4. CHOOSE a'       In s', pick a' using the SAME ε-greedy policy   ← the SARSA twist
+                   (Q-Learning skipped this step — it just used max)
+
+5. UPDATE Q        Q(s, a) ← Q(s, a) + α[r + γ·Q(s', a') − Q(s, a)]
+
+6. UPDATE STATE    s ← s',  a ← a'    (carry the chosen next-action forward)
+
+7. REPEAT 2-6      Until convergence
+```
+
+Note step 4: SARSA *commits to the next action before updating*. Q-Learning didn't need to — it used the hypothetical optimal action.
+
+#### On-policy vs off-policy — the core distinction
+
+| | Off-policy (Q-Learning) | On-policy (SARSA) |
+|---|---|---|
+| **Policy being learned** | The optimal policy $\pi^*$ | The current behavior policy (including exploration) |
+| **Update target** | $\max_{a'} Q(s', a')$ — assumes future-greedy | $Q(s', a')$ for the action actually chosen |
+| **Behavior during learning** | Aggressive — happy to explore risky states because it learns about the optimum | Cautious — internalizes the cost of its own exploration |
+| **Convergence** | To $Q^*$ regardless of behavior policy (as long as all (s,a) visited often enough) | To Q-value of whatever policy is being used (will track it as policy changes) |
+
+##### The cliff-walking intuition
+
+The classic teaching example. Imagine a grid:
+
+```
+S . . . . . . . . G       S = start, G = goal
+C C C C C C C C C C       C = cliff (huge negative reward, episode ends)
+```
+
+Two policies the agent could learn:
+- **Optimal (along the cliff edge)** — shortest path, but one slip into the cliff = disaster.
+- **Safe (one row up from the cliff)** — slightly longer, but cliff isn't reachable in one wrong step.
+
+With ε-greedy exploration during training:
+- **Q-Learning** learns the optimal-along-the-edge policy. It uses $\max_{a'}$ in the update, so it knows the edge path is technically best — and it doesn't internalize the cost of *occasionally* random-walking off the cliff.
+- **SARSA** learns the safe one-row-up policy. It uses $Q(s', a')$ for the action actually taken (which is occasionally the random ε-greedy off-cliff step) — so it sees the real cost of being adjacent to the cliff and learns to avoid it.
+
+**Same algorithm structure, opposite behaviors.** This is the canonical "when to use SARSA vs Q-Learning" example.
+
+#### Exploration strategies — same as Q-Learning
+
+##### ε-greedy
+
+Same formula as §14:
+
+$$
+a = \begin{cases}
+\text{random} & \text{w.p. } \varepsilon \\
+\arg\max_{a'} Q(s, a') & \text{w.p. } 1 - \varepsilon
+\end{cases}
+$$
+
+##### Softmax (Boltzmann) — smoother exploration
+
+Instead of "best action OR uniform random," softmax assigns each action a probability proportional to $e^{Q/\tau}$:
+
+$$
+P(a \mid s) = \frac{e^{Q(s, a) / \tau}}{\sum_{a'} e^{Q(s, a') / \tau}}
+$$
+
+| $\tau$ (temperature) | Behavior |
+|---|---|
+| Large | All actions roughly equally likely (uniform exploration) |
+| Small | Concentrated on the highest-Q action (greedy) |
+| → 0 | Pure greedy, identical to ε=0 |
+
+This is the same softmax function from logistic-regression / multi-class classification — same math, used here as an exploration mechanism. **In LLMs, the temperature parameter is exactly this $\tau$** controlling output token sampling.
+
+#### Convergence and tuning
+
+SARSA converges to the optimal policy under conditions:
+
+1. Learning rate $\alpha$ decays appropriately ($\sum \alpha_t = \infty$, $\sum \alpha_t^2 < \infty$ — Robbins-Monro conditions).
+2. All state-action pairs are visited infinitely often (the exploration-frequency condition).
+3. Stationary environment (Markov property).
+
+Tuning knobs:
+
+| Parameter | Effect of "high" | Effect of "low" |
+|---|---|---|
+| **Learning rate $\alpha$** | Faster updates, less stable | Slower learning, more stable |
+| **Discount factor $\gamma$** | Far-sighted (values long-term reward) | Myopic (only short-term) |
+| **Exploration $\varepsilon$ or $\tau$** | More exploration, slower convergence | Faster but risks local optima |
+
+Standard pattern: decay $\alpha$ and $\varepsilon$ over time, hold $\gamma$ fixed.
+
+#### Assumptions
+
+Same as Q-Learning:
+- **Markov property** — next state depends only on $(s, a)$, not history.
+- **Stationary environment** — dynamics don't change over time.
+
+#### When to use SARSA vs Q-Learning
+
+| Use SARSA when... | Use Q-Learning when... |
+|---|---|
+| Online learning where exploration mistakes are costly (medical, autonomous vehicles, real money) | Offline learning or simulation where mistakes are free |
+| You need a safe, robust policy that internalizes ε-greedy noise | You want the absolute optimal policy and exploration noise won't be present at deployment |
+| Stability and predictability matter more than max performance | Squeezing out the last few % of performance matters |
+
+#### Red-team angles
+
+- **Modern RLHF (PPO and friends) is conceptually closer to SARSA than Q-Learning.** PPO is on-policy: it learns from data generated by the current policy, with a "trust region" / clipping mechanism that keeps updates conservative. The aligned-LLM behavior produced by PPO inherits SARSA-like cautiousness: the model is trained to "stay close to safe behavior even when exploring." Jailbreaks (Modules 04–05) exploit gaps in this conservative training distribution — adversarial prompts push the model into states it wasn't trained on cautiously.
+- **SARSA agents are MORE predictable than Q-Learning agents.** Conservative on-policy learners tend toward safe-but-stereotyped policies → behavior is easier for an attacker to model + exploit. Q-Learning agents may be more random in mid-training but eventually deterministic.
+- **The on-policy property is exploitable via "exploration spoofing."** If an attacker can manipulate what the agent perceives during ε-greedy exploration steps (e.g., adversarial perturbation of state during the random action), the SARSA agent learns that the *neighborhood* of certain states is dangerous → permanently biases the policy away from those (legitimate) states. Effectively, you can use the agent's own learning process to teach it to avoid features you care about.
+- **Softmax temperature is an attack surface in LLMs.** When sampling tokens with temperature $\tau$, low $\tau$ gives consistent predictable outputs (easier to attack with crafted prompts that target argmax tokens), high $\tau$ gives diverse output (harder to predict, but each generation has higher chance of occasionally producing harmful content). Many jailbreak techniques specifically exploit high-temperature sampling.
+- **Cliff-walking dynamics in security-critical RL.** Real systems (autonomous vehicles, surgical robots) prefer SARSA-style policies for safety reasons — but this means the deployed policy is suboptimal *and* avoids "edge" states. An attacker who can craft scenarios that look like "edges" can cause the agent to take long detours or refuse to act, leading to availability/DOS-style failures.
+- **Same Markov + stationary assumptions = same exploitable surfaces** as Q-Learning. Inject history-dependent dynamics or non-stationarity → predictable policy failures.
+
+**Takeaways:**
+- SARSA = Q-Learning with one change: use $Q(s', a')$ for the actually-chosen $a'$ instead of $\max_{a'} Q(s', a')$.
+- Off-policy (Q-Learning, aggressive, learns optimal) vs On-policy (SARSA, conservative, learns "current behavior").
+- Cliff-walking: SARSA learns the safe path one row above the cliff; Q-Learning learns the optimal-but-risky edge path.
+- Same exploration strategies: ε-greedy, softmax (with temperature $\tau$ — same parameter as LLM token sampling).
+- Modern RLHF (PPO) is philosophically SARSA-like — on-policy + conservative — and aligned-LLM jailbreaks exploit gaps in that conservative training.
 
 ---
 
 ### 16. Introduction to Deep Learning
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A subset of ML that uses **artificial neural networks with many layers** ("deep") to learn directly from raw data. Distinguishing feature vs. classical ML: deep learning **automatically learns hierarchical features** instead of relying on hand-crafted ones. Lower layers learn primitives (edges, syllables); higher layers learn compositions (faces, sentences).
+
+This is the foundational section for understanding everything attacked in Modules 06–11.
+
+#### Why "deep" — the hierarchy of features
+
+```
+Image input → [edges, textures] → [shapes, parts] → [objects] → "cat"
+                ↑ Layer 1            ↑ Layer 2-3      ↑ Layer 4    ↑ Output
+
+Each layer transforms the previous layer's output into a more abstract representation.
+The depth (number of layers) is what enables this compositional learning.
+```
+
+**Why this matters for security:** in classical ML you attacked the *features* (e.g. craft an email that looks ham). In DL you can attack the *learned representations* directly — perturbations that look like noise to a human but trigger specific neuron activations the model was trained to associate with target classes.
+
+#### Anatomy of a neural network
+
+A neural net is a stack of **layers**, each made of **neurons** connected to the previous layer by **weighted edges**.
+
+```
+   Input          Hidden           Hidden           Output
+   layer          layer 1          layer 2          layer
+
+    x₁ ●───┐     ┌─● ───┐         ┌─● ───┐         ┌─● → ŷ₁
+           ╲    ╱       ╲        ╱       ╲        ╱
+    x₂ ●───┼───●─────────●───────●─────────●───────●  → ŷ₂
+           ╱    ╲       ╱        ╲       ╱        ╲
+    x₃ ●───┘     └─● ───┘         └─● ───┘         └─● → ŷ₃
+
+  features    learned features    learned features   predictions
+              (low-level)          (high-level)
+```
+
+| Layer type | Role |
+|---|---|
+| **Input layer** | Receives raw features (one neuron per feature). No computation, just pass-through. |
+| **Hidden layers** | The actual learning happens here. Each neuron computes $\sigma(\mathbf{w} \cdot \mathbf{x} + b)$ — same shape as logistic regression from §5. "Deep" = many hidden layers. |
+| **Output layer** | Produces final predictions. Number + activation depends on task: 1 sigmoid for binary, $K$-way softmax for multi-class, linear for regression. |
+
+Each neuron's computation:
+
+$$
+z = \mathbf{w} \cdot \mathbf{x} + b, \qquad a = \phi(z)
+$$
+
+where $\phi$ is the activation function. Stack these per-neuron computations into matrix form per layer:
+
+$$
+\mathbf{a}^{(\ell)} = \phi(W^{(\ell)} \mathbf{a}^{(\ell-1)} + \mathbf{b}^{(\ell)})
+$$
+
+That's literally the entire forward pass — repeat once per layer.
+
+#### Activation functions — where the non-linearity comes in
+
+Without activation functions, stacking linear layers just produces another linear function (a stack of matrix multiplies = one big matrix multiply). Activations introduce non-linearity → the network can model curved decision boundaries.
+
+| Activation | Formula | Range | When used |
+|---|---|---|---|
+| **Sigmoid** | $\sigma(z) = \frac{1}{1 + e^{-z}}$ | $(0, 1)$ | Binary classification output; rare in hidden layers (gradient saturation) |
+| **Tanh** | $\tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}}$ | $(-1, 1)$ | Older RNNs; centered version of sigmoid |
+| **ReLU** | $\text{ReLU}(z) = \max(0, z)$ | $[0, \infty)$ | **The default for hidden layers in modern DL** |
+| **Softmax** | $\text{softmax}(z_i) = \frac{e^{z_i}}{\sum_j e^{z_j}}$ | $(0, 1)$, sums to 1 | Multi-class classification output (probabilities over classes) |
+
+##### Why ReLU dominates
+
+```
+ReLU(z) = max(0, z)
+
+         │
+       3 │           ╱
+       2 │         ╱
+       1 │       ╱
+       0 ┤─────●────────────→ z
+            -2 -1  1  2  3
+```
+
+Cheap (one comparison + max), gradient is exactly 1 for $z > 0$ (no saturation), and the resulting network is **piecewise linear** — every input lives in some "linear region" defined by which ReLUs are active. This piecewise-linearity is *what makes gradient-based adversarial attacks work* — the gradient $\nabla_x f$ is well-defined and informative within each region.
+
+#### The forward pass — input → prediction
+
+```
+x → [layer 1: z = Wx + b, a = ReLU(z)] →
+  → [layer 2: z = Wa + b, a = ReLU(z)] →
+  → [output:  z = Wa + b, a = softmax(z)] →  ŷ
+```
+
+Just matrix multiplies + activations, repeated. For a typical net with 5–100 layers and millions of weights, this is hundreds of millions of multiply-adds — but a GPU does it in milliseconds.
+
+#### The loss function — measuring how wrong we are
+
+The **loss** $\mathcal{L}(\hat{y}, y)$ is a scalar that measures the gap between prediction $\hat{y}$ and target $y$. Training = adjust weights to minimize average loss over the training set.
+
+| Task | Loss | Formula |
+|---|---|---|
+| **Regression** | Mean Squared Error | $\mathcal{L} = \frac{1}{N} \sum_i (\hat{y}_i - y_i)^2$ |
+| **Binary classification** | Binary Cross-Entropy | $\mathcal{L} = -\frac{1}{N} \sum_i [y_i \log \hat{y}_i + (1 - y_i) \log(1 - \hat{y}_i)]$ |
+| **Multi-class classification** | Categorical Cross-Entropy | $\mathcal{L} = -\frac{1}{N} \sum_i \sum_c y_{i,c} \log \hat{y}_{i,c}$ |
+
+**Cross-entropy** is the classification workhorse. Notice the $\log$ — same MathJax/LaTeX-rendered math from §2 — and the negative sign. The negative log of a probability is small when the probability is large (right answer with confidence) and large when the probability is small (wrong answer or low confidence).
+
+#### Backpropagation — how we compute the gradient
+
+Backprop is the algorithm that computes $\nabla_W \mathcal{L}$ — the gradient of the loss with respect to every weight in the network. It works by applying the **chain rule** of calculus, propagating gradients from the output layer backward to the input.
+
+High-level:
+
+```
+1. Forward pass: compute predictions ŷ and the loss L.
+
+2. Backward pass: starting at the output, compute ∂L/∂W for each layer
+   working backward, using the chain rule to combine gradients across layers.
+
+3. Weight update: each weight is nudged opposite to its gradient:
+       W ← W − α · ∂L/∂W
+   where α is the learning rate.
+
+4. Repeat for the next minibatch of training examples.
+```
+
+You don't typically implement backprop yourself — frameworks (PyTorch, TensorFlow, JAX) do it automatically via **autograd** (automatic differentiation). But conceptually: every weight ends up with a gradient saying "increase me to reduce loss" or "decrease me to reduce loss", and the optimizer steps in that direction.
+
+**This gradient is the central object adversarial attacks weaponize.** FGSM, I-FGSM, DeepFool, JSMA all compute gradients — but with respect to the **input** $x$, not the weights $W$ — and use that gradient to craft perturbations.
+
+#### Optimizers — different ways to apply the gradient
+
+| Optimizer | Idea | When |
+|---|---|---|
+| **SGD** | $W \leftarrow W - \alpha \nabla_W \mathcal{L}$ — simple gradient step | Baseline, well-understood; sometimes best after careful LR tuning |
+| **SGD + Momentum** | Carries velocity across updates: $v \leftarrow \mu v + \nabla_W \mathcal{L}$, $W \leftarrow W - \alpha v$ | Smooths SGD's noisy gradient; standard for image classification |
+| **Adam** | Adaptive per-parameter learning rates using running estimates of first and second moments of the gradient | **Default for most modern DL** — fast convergence, low tuning |
+| **RMSprop** | Adam's predecessor — adaptive per-parameter learning rates only | RNN training, where it remained popular for a while |
+
+#### Hyperparameters — set before training, control everything
+
+| Hyperparameter | Effect |
+|---|---|
+| **Learning rate** $\alpha$ | Step size. Too high → divergence; too low → slow + stuck in local minima |
+| **Number of layers (depth)** | More layers = more representational power, more risk of vanishing/exploding gradients |
+| **Neurons per layer (width)** | More = more capacity, more risk of overfitting |
+| **Batch size** | How many examples per gradient step; affects gradient noise + memory |
+| **Number of epochs** | Passes through the dataset; too many → overfit, too few → underfit |
+| **Regularization strength** $\lambda$ | L1/L2 penalty (from §3) controlling overfitting |
+| **Dropout rate** | Randomly zero some neurons during training as a regularizer |
+
+Tuning these well is half the practical art of DL. Tools: grid search, random search, Bayesian optimization, learning-rate schedulers.
+
+#### Red-team angles — this section is the foundation of every later attack module
+
+- **Backpropagation creates the gradient → adversarial attacks weaponize it.** FGSM (Module 09) computes $\nabla_x \mathcal{L}$ — gradient of loss w.r.t. **input** instead of w.r.t. weights — and steps the input in that direction to maximize loss → misclassification. The same backprop machinery used to train the model is what an attacker uses to break it.
+- **ReLU's piecewise linearity is the geometric basis of evasion attacks.** Within each "linear region" (defined by which ReLUs are active for a given input), the network is exactly linear. So a small perturbation in the input causes a *predictable linear change* in the output — exactly the regime where gradient-based attacks succeed. Networks built entirely from non-piecewise-linear activations (sigmoid-only, etc.) are harder to attack with single-step methods, but iterative attacks still work.
+- **Cross-entropy loss IS what FGSM follows.** The standard FGSM formula is: $x_{\text{adv}} = x + \varepsilon \cdot \text{sign}(\nabla_x \mathcal{L}_{\text{CE}}(f(x), y))$. The cross-entropy loss is the function being maximized; "moving in the gradient direction" means moving the input toward higher loss for the correct class.
+- **Targeted attacks invert the loss.** Untargeted: maximize loss for correct class (push to *anywhere* wrong). Targeted: minimize loss for the *attacker-chosen* class (push specifically to a chosen wrong class). Module 09 covers both.
+- **Adam's adaptive learning rates affect attack difficulty.** Adversarial training (training on adversarial examples to defend) interacts with Adam's adaptivity in non-obvious ways — sometimes the optimizer's own state can be poisoned via crafted training inputs.
+- **Hyperparameters affect attack surfaces.**
+  - Smaller learning rates → smoother loss landscapes → easier to find adversarial examples (gradients more reliable).
+  - More layers → richer feature hierarchy → more places adversarial perturbations can exploit (but also harder to engineer).
+  - Higher dropout → randomized inference → harder for single-step attacks (model output varies between calls), but iterative attacks still succeed via expectation-over-random-passes.
+- **Output activation determines attack target.** Softmax outputs are probabilities; attacks against a classifier with sigmoid output are trivially easier (one-dimensional decision boundary). Most production classifiers use softmax → multi-dimensional attack target.
+- **The "learns features automatically" property is a double-edged sword.** Defenders can't enumerate which features the model relies on, so they can't defend each one explicitly. Attackers can probe the model to discover spurious learned features (e.g. "this image classifier secretly relies on the green grass background to detect cows") and exploit them.
+
+**Takeaways:**
+- Deep learning = many-layer neural networks that learn hierarchical features automatically.
+- Per-neuron computation: $z = \mathbf{w} \cdot \mathbf{x} + b$, $a = \phi(z)$. Per-layer: $\mathbf{a}^{(\ell)} = \phi(W^{(\ell)} \mathbf{a}^{(\ell-1)} + \mathbf{b}^{(\ell)})$.
+- Activations: ReLU dominates hidden layers (cheap, piecewise linear); sigmoid/softmax for outputs.
+- Loss functions: MSE for regression, cross-entropy for classification.
+- **Backpropagation** computes $\nabla_W \mathcal{L}$ via the chain rule — the gradient is the central object both training and attacks rely on.
+- Optimizers: SGD/Momentum/Adam/RMSprop. Adam is the default.
+- Hyperparameters: LR, depth, width, batch size, epochs, regularization, dropout.
+- **Adversarial attacks (FGSM, DeepFool, JSMA) reuse the same backprop gradient — but with respect to the input instead of weights — to craft perturbations that maximize loss.**
 
 ---
 
 ### 17. Perceptrons
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+The **atomic unit** of neural networks. A perceptron models a single artificial neuron: take weighted inputs, sum them, add a bias, apply an activation, output one number. Every modern deep network is just thousands-to-billions of these stacked in layers.
+
+Recognition moment: **a perceptron is mathematically identical to logistic regression (§5)** — just with a step activation instead of a sigmoid. Once this clicks, the entire NN vocabulary makes sense.
+
+#### Anatomy
+
+```
+   x₁ ●──── w₁ ───┐
+                  │
+   x₂ ●──── w₂ ───┤
+                  ├─── Σ ──── (+ b) ──── f(·) ──── y
+   x₃ ●──── w₃ ───┤
+                  │
+   ⋮              │
+                  │
+   xₙ ●──── wₙ ───┘
+```
+
+| Component | Symbol | Role |
+|---|---|---|
+| **Inputs** | $x_1, x_2, \dots, x_n$ | Feature values |
+| **Weights** | $w_1, w_2, \dots, w_n$ | Learned importance of each input |
+| **Summation** | $\sum w_i x_i$ | Weighted sum of inputs |
+| **Bias** | $b$ | Shift the activation threshold (lets the neuron fire even with all-zero inputs) |
+| **Activation** | $f$ | Non-linear function applied to the weighted sum + bias |
+| **Output** | $y$ | Scalar result — typically binary (0/1) for a classic perceptron |
+
+The whole computation in one line:
+
+$$
+y = f\!\left(\sum_{i=1}^{n} w_i x_i + b\right) = f(\mathbf{w} \cdot \mathbf{x} + b)
+$$
+
+**Notice:** $\mathbf{w} \cdot \mathbf{x} + b$ is *exactly* the logistic-regression and SVM score. The only difference between these three algorithms is what $f$ is:
+
+| Algorithm | Activation $f$ |
+|---|---|
+| **Perceptron (classic)** | Step function: $f(z) = 1$ if $z > 0$, else $0$ |
+| **Logistic regression (§5)** | Sigmoid: $f(z) = \frac{1}{1 + e^{-z}}$ |
+| **Linear SVM (§8)** | Sign function: $f(z) = \text{sign}(z)$ (with margin constraint during training) |
+
+They're all **linear classifiers** wearing different masks.
+
+#### Worked example — HTB's "play tennis" decision
+
+Setup — a perceptron with four inputs, weights, and bias:
+
+| Feature | Value | Weight |
+|---|---|---|
+| Outlook (Sunny=0, Overcast=1, Rainy=2) | 0 | $w_1 = 0.3$ |
+| Temperature (Hot=0, Mild=1, Cool=2) | 1 | $w_2 = 0.2$ |
+| Humidity (High=0, Normal=1) | 0 | $w_3 = -0.4$ |
+| Wind (Weak=0, Strong=1) | 0 | $w_4 = -0.2$ |
+| Bias | — | $b = 0.1$ |
+
+Step 1 — weighted sum:
+
+$$
+\mathbf{w} \cdot \mathbf{x} = (0.3)(0) + (0.2)(1) + (-0.4)(0) + (-0.2)(0) = 0.2
+$$
+
+Step 2 — add bias:
+
+$$
+z = 0.2 + 0.1 = 0.3
+$$
+
+Step 3 — apply step activation:
+
+$$
+y = f(0.3) = 1 \quad (\text{since } 0.3 > 0) \quad \Rightarrow \text{Play Tennis}
+$$
+
+In code:
+
+```python
+def step_activation(z):
+    return 1 if z > 0 else 0
+
+# Features: sunny, mild, high humidity, weak wind
+x = [0, 1, 0, 0]
+w = [0.3, 0.2, -0.4, -0.2]
+b = 0.1
+
+z = sum(wi * xi for wi, xi in zip(w, x)) + b
+y = step_activation(z)
+print(y)   # → 1  (Play Tennis)
+```
+
+That's the complete forward pass of a perceptron. A 100-layer deep neural net is this same computation repeated millions of times.
+
+#### The critical limitation — linear separability
+
+A single perceptron can only learn **linearly separable** boundaries — the same limitation as logistic regression and linear SVM. The boundary is:
+
+$$
+\mathbf{w} \cdot \mathbf{x} + b = 0
+$$
+
+which is a hyperplane. Any decision that requires a non-linear boundary is impossible for a single perceptron.
+
+##### The XOR problem — the classic counterexample
+
+XOR: output 1 if exactly one input is 1, else 0.
+
+| $x_1$ | $x_2$ | XOR |
+|---|---|---|
+| 0 | 0 | 0 |
+| 0 | 1 | 1 |
+| 1 | 0 | 1 |
+| 1 | 1 | 0 |
+
+Plotted in 2D:
+
+```
+  x₂
+  │
+  1 ●────────────○
+  │              │
+  │              │
+  │              │
+  0 ○────────────●
+    0            1   x₁
+
+  ● = class 1 (XOR outputs 1)
+  ○ = class 0 (XOR outputs 0)
+```
+
+**No single straight line separates the ●s from the ○s.** Try it — whichever line you draw, two of the four points end up on the wrong side. XOR is not linearly separable → no perceptron can solve it.
+
+##### Historical consequence — the first AI winter
+
+Minsky & Papert's 1969 book *Perceptrons* proved the XOR limitation and argued the perceptron framework was fundamentally limited. This (along with other factors) triggered the first "AI winter" — a period of reduced funding and interest in neural networks that lasted roughly until the mid-1980s.
+
+What revived the field was the combination of:
+1. **Multi-layer perceptrons (MLPs)** — stacking perceptrons across hidden layers solves XOR and far more.
+2. **Backpropagation** (popularized 1986) — made training those multi-layer networks computationally tractable.
+
+Every modern deep network is the direct descendant of this revival — MLP + backprop + better activations + more compute.
+
+#### Training a perceptron — the perceptron learning rule
+
+Rosenblatt's original rule (1958, pre-backprop): if the perceptron makes a mistake, nudge weights toward the correct answer:
+
+$$
+w_i \leftarrow w_i + \alpha (y_{\text{true}} - y_{\text{pred}}) \, x_i
+$$
+
+where $\alpha$ is the learning rate. Simple, guaranteed to converge if the data is linearly separable (the **perceptron convergence theorem**), and the conceptual seed of gradient descent. The more general method that supplanted it is gradient descent on a differentiable loss, which required replacing the step activation with sigmoid/ReLU (step isn't differentiable).
+
+#### Red-team angles
+
+- **A perceptron is the simplest possible gradient-attack target.** The decision boundary $\mathbf{w} \cdot \mathbf{x} + b = 0$ is known to the attacker once they have the weights. The smallest perturbation to flip the output is directly along the direction $\mathbf{w}$, scaled by just enough to cross zero: $\delta = -\frac{\mathbf{w} \cdot \mathbf{x} + b}{\lVert \mathbf{w} \rVert^2} \mathbf{w}$. This is the **DeepFool** attack (Module 09) in its simplest form — generalized to multi-layer networks by iterating on the piecewise-linear regions of the network.
+- **Step activation breaks differentiability.** That's why modern networks don't use it — backprop needs derivatives. But in the minority of deployments that use non-differentiable components (quantized models, binarized networks), gradient-based attacks are harder → *gradient-free* attacks (genetic algorithms, zeroth-order optimization) become relevant. Some ML defenses intentionally add non-differentiable components as "gradient masking" — but those defenses have been repeatedly broken by adaptive attacks.
+- **Weight extraction against linear classifiers is trivial** with enough query access. $(n+1)$ linearly independent queries suffice to recover the $n$ weights + bias exactly via linear algebra. Module 07's model reverse engineering applies here as the easiest case.
+- **The XOR limitation motivated the entire deep-learning revolution — and the attack surfaces that come with it.** A world of linear classifiers would have been easy to defend (coefficient inspection, interpretability). Deep networks' non-linear compositional capacity is exactly what makes them both powerful and attackable.
+- **The perceptron learning rule IS an adversarial-training primitive.** If an attacker can control $(y_{\text{true}}, x)$ pairs the model sees during online training, they can steer the weights arbitrarily via the same update rule the defender is using to improve the model. Online-learning systems are especially exposed.
+
+**Takeaways:**
+- Perceptron = single artificial neuron = logistic regression with a step activation. Forward pass: $y = f(\mathbf{w} \cdot \mathbf{x} + b)$.
+- Every neuron in every modern deep network is a perceptron with a different activation (typically ReLU).
+- Single-layer perceptrons can only learn **linearly separable** boundaries — XOR is the famous counterexample.
+- Multi-layer perceptrons (MLPs) + backpropagation solved XOR and launched modern DL — covered next in §18.
+- Decision boundary $\mathbf{w} \cdot \mathbf{x} + b = 0$ is the simplest gradient-attack target; DeepFool's closed-form solution for linear models is one line of algebra.
 
 ---
 
 ### 18. Neural Networks
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+**Multi-Layer Perceptrons (MLPs)** — stack perceptrons into layers, connect them fully, and training figures out which combinations of inputs matter. This architecture solves problems single perceptrons can't (starting with XOR), and it's the backbone of every modern deep-learning model you'll attack.
+
+Most content here was covered in §16 (activations, backprop, gradient descent) and §17 (the per-neuron computation). This section's job: the *multi-layer* aspects.
+
+#### Architecture — three types of layers
+
+```
+   Input         Hidden layer 1       Hidden layer 2      Output
+   layer         (features-of-        (features-of-       layer
+                  inputs)              features)
+
+    x₁ ●─────────●─────────────────────●──────────────────● → ŷ₁
+       ╲╱                             ╲╱
+       ╱╲                             ╱╲
+    x₂ ●─────────●─────────────────────●──────────────────● → ŷ₂
+       ╲╱                             ╲╱
+       ╱╲                             ╱╲
+    x₃ ●─────────●─────────────────────●──────────────────● → ŷ₃
+
+       ↑         ↑         ↑          ↑         ↑         ↑
+       raw      low-level learned    high-level learned   final
+       features features              features             predictions
+```
+
+**Fully-connected** (or "dense"): every neuron in one layer connects to every neuron in the next. This is the default for MLPs — other architectures like CNNs use restricted connectivity (§19) and RNNs add temporal connections (§20).
+
+| Layer | Role | Notes |
+|---|---|---|
+| **Input** | Pass-through of feature values | One neuron per feature; no computation |
+| **Hidden** | Learn intermediate representations | One or more layers; "deep" = many of these |
+| **Output** | Produce final prediction | Size + activation chosen to match the task |
+
+#### Output-layer sizing — task-dependent
+
+| Task | Output neurons | Activation |
+|---|---|---|
+| Binary classification | 1 | Sigmoid (probability of positive class) |
+| Multi-class classification | $K$ (one per class) | Softmax (probability distribution) |
+| Regression | 1 | Linear (no activation) |
+| Multi-output regression | $K$ (one per target) | Linear |
+
+This is a frequent source of attack-surface detail: for binary, the logit $z$ is a single scalar; for multi-class, the attacker has $K$ logits to work with. Targeted adversarial attacks exploit the multi-class structure.
+
+#### Per-neuron computation (recap from §17)
+
+Every neuron in every layer does:
+
+$$
+z = \mathbf{w} \cdot \mathbf{a}^{(\ell-1)} + b, \qquad a = \phi(z)
+$$
+
+where $\mathbf{a}^{(\ell-1)}$ is the activation vector from the previous layer. Stack per-layer:
+
+$$
+\mathbf{a}^{(\ell)} = \phi(W^{(\ell)} \mathbf{a}^{(\ell-1)} + \mathbf{b}^{(\ell)})
+$$
+
+The matrix $W^{(\ell)}$ has one row per neuron in layer $\ell$, one column per neuron in layer $\ell-1$. Size = (neurons in $\ell$) × (neurons in $\ell-1$).
+
+#### How multi-layer solves XOR
+
+From §17: a single perceptron can't separate XOR's diagonal classes. An MLP with just **one hidden layer of 2 neurons** solves it — the hidden layer transforms the inputs into a new feature space where the classes *are* linearly separable.
+
+Conceptually:
+
+```
+x₁ ●─┐                 h₁ ●   (learns: "x₁ AND NOT x₂" — fires on (1,0))
+     ├────hidden─────┤                                    
+x₂ ●─┘                 h₂ ●   (learns: "NOT x₁ AND x₂" — fires on (0,1))
+
+Then output = h₁ OR h₂ = 1 when exactly one of x₁, x₂ is 1 = XOR
+```
+
+The hidden layer's job is to warp the input space so the output layer's linear decision boundary suffices. **Every deep network works this way — each layer is a learned coordinate transformation that makes the next layer's job easier.** This is the hierarchical-feature intuition from §16 made concrete.
+
+#### The Universal Approximation Theorem
+
+A theorem from 1989 (Cybenko, then Hornik): **an MLP with a single hidden layer of enough neurons, using a non-linear activation, can approximate any continuous function on a bounded domain to arbitrary accuracy.**
+
+In plain English: MLPs are **universal function approximators**. If there's a function mapping your inputs to your outputs, an MLP can in principle represent it.
+
+Caveats:
+- "Enough neurons" can be exponentially many — narrow-but-deep networks are usually more parameter-efficient than wide-but-shallow ones.
+- "Can represent" ≠ "can learn from data" — you still need enough training data + a good optimizer to find those weights.
+
+**Security implication:** because MLPs can represent any function, an attacker who can poison training data enough (Module 06) can in principle make the model learn *any* input-output mapping — including arbitrary backdoors (trojan attacks).
+
+#### Activation functions — brief recap from §16
+
+| Activation | Range | Typical use | Attack-relevant property |
+|---|---|---|---|
+| **ReLU** | $[0, \infty)$ | Hidden layers (default) | Piecewise linear → exploitable by single-step gradient attacks |
+| **Sigmoid** | $(0, 1)$ | Binary output | Saturation → gradient masking issue |
+| **Tanh** | $(-1, 1)$ | RNN hidden states (historical) | Similar saturation issue as sigmoid |
+| **Softmax** | $(0, 1)$, sums to 1 | Multi-class output | Gradient w.r.t. logits has closed form — the standard attack target |
+
+#### Training — backpropagation + gradient descent
+
+Recap from §16:
+
+```
+For each minibatch of training examples:
+
+  1. FORWARD PASS:  compute predictions ŷ by feeding x through all layers.
+
+  2. COMPUTE LOSS:  L = loss_function(ŷ, y)   (e.g. cross-entropy)
+
+  3. BACKWARD PASS: compute ∂L/∂W for every weight via chain rule,
+                    propagating gradients layer-by-layer from output → input.
+
+  4. UPDATE WEIGHTS: W ← W − α · ∂L/∂W      (gradient descent step)
+
+Repeat over many epochs until convergence.
+```
+
+##### The gradient descent update in detail
+
+$$
+W^{(\ell)} \leftarrow W^{(\ell)} - \alpha \frac{\partial \mathcal{L}}{\partial W^{(\ell)}}
+$$
+
+$$
+b^{(\ell)} \leftarrow b^{(\ell)} - \alpha \frac{\partial \mathcal{L}}{\partial b^{(\ell)}}
+$$
+
+One step per minibatch. Over thousands of minibatches, the weights converge to a local minimum of the loss. Adam (from §16) replaces vanilla SGD with adaptive per-parameter learning rates — same shape, smarter step sizes.
+
+#### Variations of gradient descent (vocabulary)
+
+| Variant | Batch size | Trade-off |
+|---|---|---|
+| **Batch GD** | All data at once | Stable gradient, slow per step, needs lots of memory |
+| **Stochastic GD (SGD)** | One sample at a time | Noisy updates, fast per step, escapes local minima via noise |
+| **Mini-batch GD** | Typical: 32–256 samples | Best practical trade-off — **the standard for DL** |
+
+#### Red-team angles
+
+- **MLPs are piecewise linear (when using ReLU).** Each input $x$ lies in one "linear region" defined by which ReLUs are active — within that region, the net acts like a linear function $\mathbf{w}_{\text{local}} \cdot \mathbf{x} + b_{\text{local}}$. This is why **gradient-based attacks (FGSM, etc.) work**: the gradient $\nabla_x f$ correctly predicts how small perturbations change the output. Attacks essentially use the local linear approximation.
+- **Adversarial examples transfer across MLP architectures.** An adversarial perturbation crafted against one model often fools other models trained on the same data — because different networks learn correlated decision surfaces. This enables **black-box attacks**: train a surrogate MLP, craft attacks against it, transfer to the target. Module 09 covers this explicitly.
+- **Universal Approximation = arbitrary-backdoor capacity.** Because MLPs can approximate any function, a sufficiently-powerful attacker with enough training-data influence can insert arbitrary input-output mappings into the trained model. Trojan attacks (Module 06) exploit this: the model learns the *normal* task correctly + a *hidden* triggered-input-to-target-output mapping, and the universal-approximation property says there's always enough capacity for both.
+- **Depth/width interact with attack success.**
+  - **Wider hidden layers** → more linear regions → more diverse attack directions → easier to find adversarial examples.
+  - **Deeper networks** → more complex decision boundaries → harder single-step attacks, but **better adversarial-example transfer** (deep features are more universal).
+- **Model extraction scales with parameter count.** An attacker querying the model to recover weights needs roughly $\Omega(\text{number of parameters})$ queries for exact extraction. Modern LLMs have billions of parameters — practical exact extraction is infeasible, but *functional* extraction (training a surrogate that behaves similarly) is much cheaper and is what Module 07 actually targets.
+- **Memorization enables membership inference.** MLPs have enough capacity to memorize individual training points, especially when overfit. Module 11's membership inference attacks exploit this: a point the model has "seen" during training gets a different loss/confidence signature than an unseen point.
+- **Weight matrices have exploitable structure.** Singular value decomposition of $W^{(\ell)}$ reveals which input directions the layer is most/least sensitive to. Module 07 extraction attacks on linear layers reduce to SVD (from §11).
+- **Gradient of loss w.r.t. input** ($\nabla_x \mathcal{L}$, different from the training gradient $\nabla_W \mathcal{L}$) is the backbone of all gradient-based evasion. Same backprop machinery, chain rule stops at the input instead of continuing into the weights.
+
+**Takeaways:**
+- MLP = stacked perceptrons with non-linear activations → solves non-linearly separable problems (XOR and beyond).
+- Three layer types: input, hidden (one or more), output. Size of output layer matches task (1 for binary, $K$ for multi-class).
+- **Universal Approximation Theorem:** an MLP with enough hidden neurons can approximate any continuous function.
+- Training = backprop (compute $\nabla_W \mathcal{L}$ via chain rule) + gradient descent (step weights opposite to gradient).
+- Mini-batch SGD / Adam are the practical workhorses.
+- **Adversarial attacks reuse the same chain rule with $\nabla_x \mathcal{L}$ instead of $\nabla_W \mathcal{L}$** — the crucial flip that turns training code into attack code.
 
 ---
 
