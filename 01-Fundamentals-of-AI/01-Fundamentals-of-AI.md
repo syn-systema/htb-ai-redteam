@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 6
+sections_done: 7
 started: "2026-04-14"
 completed: ""
 ---
@@ -832,7 +832,120 @@ You can throw raw, mixed-scale, non-normal, outlier-laden tabular data at a tree
 
 ### 7. Naive Bayes
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A probabilistic classifier built on **Bayes' theorem** plus one strong simplifying assumption (features are conditionally independent given the class — the "naive" part). Despite the assumption being almost never strictly true, it works astonishingly well in practice — especially for **text classification** (spam, sentiment, topic).
+
+#### Bayes' theorem — the foundation
+
+$$
+P(A \mid B) = \frac{P(B \mid A) \, P(A)}{P(B)}
+$$
+
+| Symbol | Name | Read as |
+|---|---|---|
+| $P(A \mid B)$ | **Posterior** | "Probability of $A$ given that $B$ happened" |
+| $P(B \mid A)$ | **Likelihood** | "Probability of seeing $B$ if $A$ is true" |
+| $P(A)$ | **Prior** | "What we believed about $A$ before seeing $B$" |
+| $P(B)$ | **Evidence** (marginal probability) | "Total probability of seeing $B$, summed over all causes" |
+
+The shape: posterior = (likelihood × prior) / evidence. Updating beliefs in light of new data.
+
+#### Worked example — disease test (the base-rate fallacy)
+
+Setup:
+- Disease prevalence: $P(A) = 0.01$ (1% of population)
+- Test sensitivity: $P(B \mid A) = 0.95$ (true positive rate)
+- Test false positive rate: $P(B \mid \neg A) = 0.05$
+
+You test positive. **What's the probability you actually have the disease?**
+
+Step 1 — total probability of testing positive (law of total probability):
+
+$$
+P(B) = P(B \mid A) P(A) + P(B \mid \neg A) P(\neg A) = (0.95)(0.01) + (0.05)(0.99) = 0.059
+$$
+
+Step 2 — apply Bayes:
+
+$$
+P(A \mid B) = \frac{P(B \mid A) \, P(A)}{P(B)} = \frac{(0.95)(0.01)}{0.059} \approx 0.161
+$$
+
+**~16%, not 95%.** The 95%-accurate test only gives you a 16% posterior because the disease is rare. This counterintuitive result is the **base-rate fallacy** — humans (and naive intuitions about ML) systematically over-trust likelihood and ignore the prior. It shows up directly in adversarial contexts: a 95%-accurate spam detector at a 0.1% true-spam base rate produces *mostly false positives* among its "spam" verdicts.
+
+#### Naive Bayes for classification
+
+Given an input $x$ with features $(x_1, x_2, \dots, x_n)$, we want the most-likely class $c$:
+
+$$
+P(c \mid x_1, \dots, x_n) = \frac{P(x_1, \dots, x_n \mid c) \, P(c)}{P(x_1, \dots, x_n)}
+$$
+
+The denominator is the same for every class, so we can ignore it for ranking. The numerator's joint likelihood $P(x_1, \dots, x_n \mid c)$ is computationally hopeless for many features — until we make the **naive independence assumption**:
+
+$$
+P(x_1, \dots, x_n \mid c) \approx \prod_{i=1}^{n} P(x_i \mid c)
+$$
+
+i.e. *given the class, every feature is independent of every other feature.* This collapses the joint into a product of per-feature likelihoods, which we can estimate from training data trivially. Final prediction:
+
+$$
+\hat{c} = \underset{c}{\arg\max} \; P(c) \prod_{i=1}^{n} P(x_i \mid c)
+$$
+
+In practice we sum log-probabilities (avoid underflow from multiplying many small numbers):
+
+$$
+\hat{c} = \underset{c}{\arg\max} \; \left[ \log P(c) + \sum_{i=1}^{n} \log P(x_i \mid c) \right]
+$$
+
+#### Walkthrough — spam classifier (this is exactly Module 02)
+
+| Step | What happens |
+|---|---|
+| 1. Compute priors | $P(\text{spam}), P(\text{ham})$ from training data (e.g. 0.2 vs 0.8) |
+| 2. Compute likelihoods | For each word $w$: $P(w \mid \text{spam})$ and $P(w \mid \text{ham})$ — count word occurrences in each class, divide by class size |
+| 3. Score new email | Multiply prior × per-word likelihoods for each class (assumes word independence — the naive part) |
+| 4. Predict | Class with the larger posterior score wins |
+
+The "naive" assumption: that the word "free" appearing in an email is independent of "money" appearing, *given* that we already know the class. Obviously false (those words co-occur in spam), but the classifier still works — because the *ranking* of class scores is often robust even when absolute probabilities are wrong.
+
+#### Three variants — pick by feature type
+
+| Variant | Feature type | Likelihood model | When to use |
+|---|---|---|---|
+| **Gaussian NB** | Continuous (real-valued) | Each $P(x_i \mid c) \sim \mathcal{N}(\mu_{i,c}, \sigma^2_{i,c})$ — fit a Gaussian per feature per class | Sensor readings, age, income |
+| **Multinomial NB** | Counts / discrete (e.g. word frequencies) | Likelihood from word-count proportions in each class | **Text classification, spam (the Module 02 default)** |
+| **Bernoulli NB** | Binary (present/absent) | Each feature is a Bernoulli draw with class-specific probability | Document classification with binary "word in doc?" features, presence/absence indicators |
+
+The HTB Module 02 spam exercise uses **Multinomial NB** because email features are word counts.
+
+#### Assumptions
+
+| Assumption | Reality | Impact |
+|---|---|---|
+| **Conditional independence** of features given class | Almost always violated | Surprisingly tolerable — class *ranking* often survives even when absolute probabilities are off |
+| **Distributional fit** (Gaussian / multinomial / Bernoulli) | Approximate | Pick the variant matching your features |
+| **Sufficient training data** | Need enough samples to estimate $P(x_i \mid c)$ stably | Otherwise zero counts cause $\log 0 = -\infty$ — fixed with **Laplace smoothing** (add 1 to every count before normalizing) |
+
+#### Red-team angles — this section's attacks are central to the path
+
+- **Module 02's Spam Classification exercise** is a Multinomial Naive Bayes spam filter. You'll build it, then later attack it.
+- **Module 08 (AI Evasion Foundations) is built around attacking Naive Bayes spam filters with the GoodWords attack.** The trick: append words with high $P(w \mid \text{ham})$ to a spam email. Each appended "good word" multiplies the ham-class score, eventually flipping the prediction. This is **the** canonical example of evading a probabilistic classifier — and it works *because* of the naive independence assumption (words are scored individually, so one decisive bad word doesn't outweigh many added good ones).
+- **The independence assumption IS the attack surface.** A defender who uses bigrams ("free money") instead of unigrams ("free", "money" separately) breaks the independence assumption advantageously and makes GoodWords harder. Attackers respond by inserting noise tokens between bigram parts.
+- **Bayes' theorem powers membership inference attacks** (Module 11). The shadow-model attack reframes "was sample $x$ in the training set?" as: $P(\text{member} \mid \text{model output}) = \frac{P(\text{output} \mid \text{member}) P(\text{member})}{P(\text{output})}$. Same structure as the disease-test example — just with "member" instead of "diseased."
+- **Priors can be poisoned.** If an attacker can influence training data composition (Module 06), they can shift $P(\text{class})$ — e.g. flooding the training set with spam relabeled as ham reduces $P(\text{spam})$, biasing the prior toward declaring everything ham at inference time.
+- **Base-rate fallacy bites detection systems hard.** A high-accuracy classifier deployed against rare events (true malware, true APT activity) generates mostly false positives — same math as the disease example. Attackers exploit this by counting on alert fatigue.
+- **Laplace smoothing leaves a fingerprint.** Models trained without smoothing crash on unseen tokens (giving probability 0); models with smoothing assign them a small but nonzero probability. An attacker probing with novel tokens can sometimes infer training set vocabulary.
+
+**Takeaways:**
+- Bayes' theorem: posterior = (likelihood × prior) / evidence. Updates beliefs given evidence.
+- Base-rate fallacy: a 95% accurate test on a 1% disease gives only ~16% posterior — priors dominate when likelihoods are close.
+- Naive Bayes assumes features are conditionally independent given the class — false but useful.
+- Final classifier: $\hat{c} = \arg\max_c P(c) \prod_i P(x_i \mid c)$.
+- Three variants by feature type: Gaussian (continuous), Multinomial (counts — **Module 02 spam**), Bernoulli (binary).
+- The independence assumption is exactly what GoodWords (Module 08) exploits.
 
 ---
 
