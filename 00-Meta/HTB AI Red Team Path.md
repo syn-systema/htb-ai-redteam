@@ -8,7 +8,7 @@ Master progress index across the 11 modules in the HackTheBox AI Red Team path.
 
 | # | Module | Difficulty | Tier | Sections | Interactive | Est. Time | Progress | Status |
 |---|---|---|---|---|---|---|---|---|
-| 01 | [[01-Fundamentals-of-AI/01-Fundamentals-of-AI\|Fundamentals of AI]] | Medium | — | 24 | 1 | — | 42% (10/24) | in-progress |
+| 01 | [[01-Fundamentals-of-AI/01-Fundamentals-of-AI\|Fundamentals of AI]] | Medium | — | 24 | 1 | — | 46% (11/24) | in-progress |
 | 02 | [[02-Applications-of-AI-in-InfoSec/02-Applications-of-AI-in-InfoSec\|Applications of AI in InfoSec]] | — | — | 25 | 17 | — | 0% | not-started |
 | 03 | [[03-Introduction-to-Red-Teaming-AI/03-Introduction-to-Red-Teaming-AI\|Introduction to Red Teaming AI]] | — | — | 11 | 3 | — | 0% | not-started |
 | 04 | [[04-Prompt-Injection-Attacks/04-Prompt-Injection-Attacks\|Prompt Injection Attacks]] | Medium | 2 | 12 | 6 | 8h | 0% | not-started |

@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 10
+sections_done: 11
 started: "2026-04-14"
 completed: ""
 ---
@@ -1344,7 +1344,154 @@ The two methods often disagree mildly. Elbow is a quick visual; silhouette is mo
 
 ### 11. Principal Component Analysis (PCA)
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+The default **dimensionality reduction** technique. Finds a new coordinate system aligned with the **directions of maximum variance** in your data, then lets you keep only the top few axes — discarding the rest as low-information noise. Compresses high-dim data into a faithful low-dim summary.
+
+#### The intuition — rotate the axes to match the data
+
+Imagine 2D data shaped like an elongated cigar. The original $(x_1, x_2)$ axes are arbitrary; PCA finds a rotation where the *first* axis runs along the cigar's length (max variance) and the *second* axis runs perpendicular (smaller variance). Keep only the first axis → you've compressed 2D → 1D while losing very little information.
+
+```
+  x₂
+  │              ●●●     ← PC1 (largest variance — long axis of the cigar)
+  │           ●●●●●●●● ↗
+  │        ●●●●●●●●●●●
+  │     ●●●●●●●●●●●●
+  │  ●●●●●●●●●●●
+  │       ↖ PC2 (perpendicular, small variance — width of the cigar)
+  │
+  └─────────────────────→ x₁
+
+PCA finds these orthogonal directions automatically.
+Drop PC2 → 2D data becomes 1D along PC1's axis.
+```
+
+In higher dimensions: same idea — find $d$ orthogonal directions ranked by variance, keep the top $k$, project the data onto those.
+
+#### The algorithm — six steps
+
+```
+1. STANDARDIZE      For each feature: z = (x - μ) / σ          (Z-score, from §9)
+
+2. COVARIANCE       Compute the d×d covariance matrix C of the standardized data
+
+3. EIGENDECOMPOSE   Solve  C v = λ v   for all eigenvectors v_i and eigenvalues λ_i
+
+4. SORT             Order eigenvectors by descending eigenvalue (largest λ first)
+
+5. SELECT           Keep the top k eigenvectors → matrix V (d × k)
+
+6. PROJECT          Y = X · V    (transforms N×d original data into N×k reduced form)
+```
+
+#### The eigenvalue equation in PCA
+
+This is the core formula:
+
+$$
+C \mathbf{v} = \lambda \mathbf{v}
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $C$ | $d \times d$ covariance matrix of standardized features |
+| $\mathbf{v}$ | An eigenvector — a direction in feature space |
+| $\lambda$ | The corresponding eigenvalue — variance captured along $\mathbf{v}$ |
+
+A covariance matrix has $d$ eigenvectors (orthogonal to each other), each with its own eigenvalue. Sort them by $\lambda$ descending → the eigenvector with the largest $\lambda$ is **PC1**, the next is **PC2**, etc.
+
+##### Quick recap from §2 — what eigenvectors mean geometrically
+
+For a transformation matrix $A$, an eigenvector $\mathbf{v}$ is a direction that $A$ only **stretches** (by factor $\lambda$), without rotating:
+
+$$
+A \mathbf{v} = \lambda \mathbf{v}
+$$
+
+Rubber-band example from HTB: $A = \begin{bmatrix} 2 & 0 \\ 0 & 1 \end{bmatrix}$, $\mathbf{v} = \begin{bmatrix} 1 \\ 0 \end{bmatrix}$:
+
+$$
+A \mathbf{v} = \begin{bmatrix} 2 \\ 0 \end{bmatrix} = 2 \mathbf{v}
+$$
+
+The vector $[1, 0]$ is an eigenvector of $A$ with eigenvalue $2$ — $A$ stretches it by 2 along the x-axis without rotating it. In PCA, the same idea: principal components are the directions that the *covariance* matrix preserves up to scaling.
+
+#### Solving the eigenvalue equation in practice
+
+| Method | What it does | When |
+|---|---|---|
+| **Eigendecomposition** | Direct: factor $C = V \Lambda V^{-1}$ | Conceptually clean; less numerically stable |
+| **Singular Value Decomposition (SVD)** | Factor the data matrix directly: $X = U \Sigma V^T$. Columns of $V$ = principal components; diagonal of $\Sigma^2 / (N-1)$ = eigenvalues | What `sklearn.decomposition.PCA` actually uses — more numerically stable, doesn't require forming $C$ explicitly |
+
+SVD is everywhere in modern ML (low-rank attention approximations, model compression, recommender systems). PCA via SVD is the canonical example.
+
+#### Projecting the data — final transformation
+
+Once you've picked the top $k$ eigenvectors as columns of $V$ (a $d \times k$ matrix):
+
+$$
+Y = X V
+$$
+
+| Symbol | Shape | Meaning |
+|---|---|---|
+| $X$ | $N \times d$ | Original standardized data |
+| $V$ | $d \times k$ | Selected eigenvectors |
+| $Y$ | $N \times k$ | Projected data in the lower-dim space |
+
+Now downstream models receive $k$-dimensional inputs instead of $d$-dimensional — faster training, less risk of curse of dimensionality (§9).
+
+#### Choosing the number of components $k$
+
+Plot **cumulative explained variance ratio** vs. $k$:
+
+```
+cumulative
+ explained
+ variance
+   ↑
+ 1.0┤                                   ───────────────────────
+    │                            ─ ─ ─ ─
+ 0.95┤─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─        ← target threshold
+    │                       ───
+    │                  ────             "knee" at k ≈ 4
+ 0.5┤             ───
+    │       ────
+    │  ────
+   0┤─
+    └──────────────────────────────────→ k
+     1   2   3   4   5   6   7   8   9
+```
+
+Standard rule: pick the smallest $k$ such that cumulative $\sum \lambda_i / \sum_{\text{all}} \lambda_i \geq 0.95$ (or 0.99 for tighter preservation). Translates to "keep enough components to explain 95% of the variance, drop the rest."
+
+#### Assumptions
+
+| Assumption | Failure mode |
+|---|---|
+| **Linearity** | PCA finds *linear* combinations of features. Curved manifolds need kernel PCA, t-SNE, UMAP, or autoencoders. |
+| **Correlated features** | If features are uncorrelated, the covariance matrix is diagonal — PCA finds nothing useful. |
+| **Standardization required** | Feature scales matter; without Z-score, large-magnitude features dominate the covariance and steal the principal components. |
+
+#### Red-team angles — PCA is **both** a defense and an attack surface
+
+- **Adversarial perturbations love the low-variance directions PCA discards.** Real data lives near a low-rank manifold; adversarial perturbations often need to push *off* this manifold — exactly into the directions PCA throws away. So a defender who applies PCA preprocessing thinks they're stripping noise, but they may also be stripping the attacker's signal — making certain attacks harder. This is the basis of **PCA-based adversarial defenses** (defensive distillation, randomized smoothing precursors).
+- **Counter-attack: adversaries craft perturbations that lie *within* the high-variance subspace** — i.e., perturbations that survive PCA projection. These on-manifold attacks are central to modern adversarial-ML research and are much harder to defend against than off-manifold attacks.
+- **Principal components leak training-data structure.** Each PC is a linear combination of features fitted to the training set's covariance. With enough query access, an attacker can reconstruct the principal components → infer which features the model considers most variable → learn what the training data looked like in aggregate. Module 07's model reverse engineering exploits this.
+- **Eigenfaces and similar PCA-based facial recognition systems** are explicitly attackable: knowing the eigenfaces (which are public for many academic models like Yale Face Database) lets an attacker craft adversarial faces that project to a target identity's coordinates in the eigenspace.
+- **PCA-based anomaly detection** projects new data into PC space and flags points with high reconstruction error (i.e., they don't fit the principal components well). Bypass: craft adversarial inputs whose components in the kept PCs match normal-data statistics → low reconstruction error → low anomaly score, while the malicious payload hides in feature combinations that don't show up in the discarded PCs.
+- **Embedding-space PCA in LLMs/RAG.** When systems compress LLM token/sentence embeddings via PCA before storage (a common cost-saving), attackers can craft prompts whose post-PCA representation collides with target documents → retrieval-injection attacks. Modules 04/05 territory.
+- **The covariance matrix itself is sensitive training data.** In federated/distributed training, sharing $C$ between parties leaks aggregated information about each party's data. There's a whole subfield of "privacy-preserving PCA" that adds noise to $C$ before computing eigenvectors.
+- **SVD = the math behind weight extraction.** Module 07's model reverse engineering against linear/low-rank models often reduces to SVD on observed input/output pairs.
+
+**Takeaways:**
+- PCA = find directions of max variance via eigendecomposition (or SVD) of the covariance matrix; keep top $k$.
+- Core equation: $C \mathbf{v} = \lambda \mathbf{v}$. Eigenvectors = principal components, eigenvalues = variance captured.
+- 6-step recipe: standardize → covariance → eigendecompose → sort → select → project.
+- Pick $k$ by cumulative explained variance ratio (typically ≥ 95%).
+- Assumes linearity, correlated features, standardized scales.
+- Defense AND attack surface — adversarial perturbations exploit the low-variance directions PCA discards (off-manifold attacks); on-manifold attacks survive PCA preprocessing.
 
 ---
 
