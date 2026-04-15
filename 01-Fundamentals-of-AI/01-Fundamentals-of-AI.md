@@ -410,7 +410,123 @@ So the L1/L2 norms you saw in Section 2 do double duty: they're used to (a) **me
 
 ### 4. Linear Regression
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A supervised algorithm that fits a **straight line** (or hyperplane in higher dimensions) through the training data, predicting a **continuous** target $y$ from one or more predictors $x$. Simplest possible learning algorithm — and the conceptual base of everything that follows.
+
+#### Where it sits
+
+| Question | Answer |
+|---|---|
+| Supervised? | Yes |
+| Output type | Continuous (regression, not classification) |
+| Decision boundary | A line / plane / hyperplane |
+| Has a closed-form solution? | **Yes (uniquely)** — see OLS below |
+| Need iteration / gradient descent? | No (but you can use it; for huge datasets, iterative is faster) |
+
+#### Simple linear regression — one predictor
+
+$$
+y = m x + c
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $y$ | Predicted target |
+| $x$ | Predictor (input feature) |
+| $m$ | Slope — "how much $y$ changes per unit change in $x$" |
+| $c$ | Intercept — value of $y$ when $x = 0$ |
+
+Same equation you saw in algebra class. Training = "find the $m$ and $c$ that make this line fit the cloud of $(x, y)$ training points as closely as possible."
+
+#### Multiple linear regression — many predictors
+
+$$
+y = b_0 + b_1 x_1 + b_2 x_2 + \dots + b_n x_n
+$$
+
+| Symbol | Meaning |
+|---|---|
+| $b_0$ | Intercept (the constant) |
+| $b_1, \dots, b_n$ | **Coefficients** — one per feature |
+| $x_1, \dots, x_n$ | Features |
+
+Each coefficient $b_j$ tells you "how much $y$ changes per unit change in feature $x_j$, holding the others constant." In neural-net terminology these coefficients are called **weights**.
+
+In matrix form (you'll see this constantly):
+
+$$
+\hat{y} = X \beta
+$$
+
+where $X$ is the data matrix (rows = samples, columns = features), $\beta$ is the vector of coefficients, $\hat{y}$ is the predicted-values vector. This `X β` is exactly the matrix-vector multiplication from Section 2.
+
+#### Ordinary Least Squares (OLS) — finding the best line
+
+We need to define "best fit." OLS picks coefficients that minimize the **sum of squared residuals**:
+
+$$
+\text{RSS}(\beta) = \sum_{i=1}^{N} (y_i - \hat{y}_i)^2 = \sum_{i=1}^{N} (y_i - X_i \beta)^2
+$$
+
+Visualizing the residuals (vertical distance from data point to fitted line):
+
+```
+        ↑
+      y │            data point ●
+        │                       ╎ ← residual = (y - ŷ)
+        │  fitted line ─ ─ ─ ─ ╎ ─ ─ ─ ─ ─ ─ ─
+        │                                    ●
+        │                                    ╎
+        │                                    ╎
+        │           ●                        ╎
+        │           ╎                        
+        │           ╎                        
+        └────────────────────────────────────→
+                                             x
+```
+
+**Why squared?**
+- All residuals become positive (no cancellation).
+- Larger errors get penalized disproportionately (a residual of 4 contributes 16, but two residuals of 2 contribute only 4+4=8).
+- The squared-error function is differentiable and convex → unique minimum, easy to solve.
+
+#### Closed-form solution — the **normal equations**
+
+For OLS, the optimal coefficients have a *direct algebraic* solution (no iteration needed):
+
+$$
+\hat{\beta} = (X^T X)^{-1} X^T y
+$$
+
+This is **rare**. Linear regression with squared loss is essentially the only practical ML algorithm with a closed-form optimum. Every other algorithm in this path (logistic regression, SVMs, neural nets) requires **iterative optimization** (gradient descent variants). Linear regression is the textbook case where you can see "the optimum exists, here's the formula" — every later algorithm is "the optimum exists somewhere, search for it."
+
+#### Assumptions
+
+OLS predictions are only reliable if the data satisfies four assumptions:
+
+| Assumption | Meaning | What breaks if violated |
+|---|---|---|
+| **Linearity** | The true relationship is actually linear | Curved patterns get systematically mis-fit; need polynomial features or a non-linear model |
+| **Independence** | Each observation is independent of the others | Time-series correlation breaks standard error estimates; need ARIMA / autoregressive models |
+| **Homoscedasticity** | Residuals have **constant variance** across the range of $x$ | If residuals fan out (more error at large $x$), confidence intervals are wrong |
+| **Normality of errors** | Residuals are normally distributed | Affects significance tests + confidence intervals (predictions themselves are still fine) |
+
+Mnemonic: **L.I.N.E.** — Linearity, Independence, Normality, Equal variance (homoscedasticity).
+
+#### Red-team angles
+
+- **Linear models are reverse-engineerable.** Coefficients $\beta$ leak directly which features the model relies on. **Module 07's model reverse engineering** exploits this — and it's much harder against deep nets, but linear regression is the trivially-easy case. If a system uses linear regression and exposes predictions, you can recover $\beta$ via algebra.
+- **The squared loss appears in adversarial-attack objectives too.** When an attacker minimizes $\lVert \delta \rVert^2$ subject to a misclassification constraint (DeepFool, ElasticNet — modules 09–10), they're solving a regularized least-squares problem. Same math, weaponized.
+- **OLS is hyper-sensitive to outliers** because residuals are squared — one bad point can swing the line. **Data poisoning attacks** (module 06) often lean on this: a few crafted training points can disproportionately distort the model.
+- **Coefficient = weight.** When module 04 talks about "model weights" and module 07 talks about "weight extraction", those are the multi-feature analogues of the $b_j$ coefficients here.
+
+**Takeaways:**
+- $y = mx + c$ (simple) → $y = X \beta$ (multiple) → $\hat{\beta} = (X^T X)^{-1} X^T y$ (OLS closed form).
+- "RSS" = sum of squared residuals = the loss being minimized.
+- Linear regression is the **only** algorithm in the path with a closed-form optimum; everything else needs iterative gradient descent.
+- L.I.N.E. assumptions: Linearity, Independence, Normality, Equal variance.
+- Coefficients = weights. Reverse engineering them = the simplest case of model extraction.
 
 ---
 
