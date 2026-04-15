@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 9
+sections_done: 10
 started: "2026-04-14"
 completed: ""
 ---
@@ -1216,7 +1216,129 @@ Centers each feature at 0 with unit variance. More robust to outliers and the st
 
 ### 10. K-Means Clustering
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+The default clustering algorithm. Partitions $N$ points into $K$ non-overlapping clusters by **iteratively** alternating between assigning points to the nearest centroid and recomputing centroids as cluster means. Minimizes total within-cluster variance.
+
+#### The algorithm — four steps, repeat until convergence
+
+```
+1. INITIALIZE   Pick K random data points as initial centroids μ₁, μ₂, …, μ_K
+
+2. ASSIGN       Each point x → cluster k* where  k* = argmin_k ||x − μ_k||²
+                (Voronoi partition of the feature space around the centroids)
+
+3. UPDATE       Each centroid μ_k ← mean of points now assigned to cluster k
+
+4. REPEAT 2-3   Until centroids stop moving (or max-iters reached)
+```
+
+Each iteration is guaranteed to decrease (or keep equal) the within-cluster sum of squares:
+
+$$
+\text{WCSS} = \sum_{k=1}^{K} \sum_{\mathbf{x} \in C_k} \lVert \mathbf{x} - \boldsymbol{\mu}_k \rVert^2
+$$
+
+The algorithm converges to a *local* minimum of WCSS — not necessarily the global one. Different random initializations can land at different solutions.
+
+##### Visualization across iterations (2D, K=2)
+
+```
+ Iter 0 (random init)         Iter 1 (after assign+update)        Iter 2 (converged)
+                              
+   ●   ●   ★                       ●   ●                              ●   ●
+     ●     ●                          ●     ●                            ●     ●
+   ●         ●                      ●  ★      ●                       ●  ★      ●
+       ●                                ●                                    ●
+                                                                       
+       ●                                  ●                                  ●
+   ●     ★                              ●                                  ●
+     ●     ●                       ★      ●                            ●  ★  ●
+                                       ●                                    ●
+
+   ★ = centroid
+```
+
+Centroids drift toward cluster means until they stabilize.
+
+##### K-Means++ (the modern initializer)
+
+Pure random initialization is fragile — bad starts → bad local minima. **K-Means++** picks initial centroids that are *spread out* (each new centroid chosen with probability proportional to squared distance from the nearest existing centroid). Default in `sklearn.cluster.KMeans`. Almost always strictly better than random init; worth knowing the name.
+
+#### Distance metric — Euclidean by default
+
+K-Means uses **Euclidean distance** ($L_2$) by default — and the math kind of requires it for the centroid-update step to make sense (the mean minimizes sum of squared $L_2$ distances). For other metrics, you'd use related algorithms (K-Medoids for $L_1$, spherical K-Means for cosine).
+
+#### Choosing K — the central problem
+
+K isn't learned; you pick it. Two standard heuristics:
+
+##### Elbow method
+
+Run K-Means for $K = 1, 2, 3, \dots$ and plot WCSS vs. K.
+
+```
+WCSS
+  ↑
+  │ ●
+  │  
+  │  ●
+  │
+  │   ●
+  │       ← elbow at K=3
+  │    ●────●─────●─────●
+  │
+  └──────────────────────→ K
+    1   2   3   4   5   6
+```
+
+WCSS always decreases with more clusters (more granular = tighter). The "elbow" — where the rate of decrease sharply slows — heuristically marks "good enough K". Beyond it, you're paying complexity for little gain (and risking overfitting).
+
+##### Silhouette analysis
+
+For each point, compute:
+
+$$
+s(i) = \frac{b(i) - a(i)}{\max(a(i), b(i))}
+$$
+
+where $a(i)$ = mean distance from $i$ to other points in its own cluster, $b(i)$ = mean distance from $i$ to points in the *nearest other* cluster. Range:
+
+| $s$ value | Meaning |
+|---|---|
+| $\approx +1$ | Point clearly belongs to its cluster |
+| $\approx 0$ | Point is on a boundary between clusters |
+| $\approx -1$ | Point likely in the wrong cluster |
+
+Average silhouette over all points → a single quality score per $K$. Pick the $K$ with the highest average silhouette.
+
+The two methods often disagree mildly. Elbow is a quick visual; silhouette is more rigorous. Combine with **domain knowledge** (e.g. "we have 4 marketing personas, so K=4 makes sense regardless of what the silhouette says").
+
+#### Assumptions
+
+| Assumption | Failure mode |
+|---|---|
+| **Spherical, similar-sized clusters** | Elongated, irregular, or heavily-imbalanced clusters get badly partitioned (use DBSCAN or Gaussian Mixture Models instead) |
+| **Standardized features** | Without scaling (Min-Max or Z-score from §9), the largest-magnitude feature dominates the distance computation |
+| **Outlier-free** | A single far-away outlier becomes its own cluster or pulls a centroid wildly off-center |
+| **Pre-chosen K** | Wrong K → meaningless or misleading clusters |
+
+#### Red-team angles
+
+- **Centroids leak training data composition.** Each centroid $\boldsymbol{\mu}_k$ is the *mean* of training points assigned to cluster $k$. With a small or homogeneous cluster, the centroid is statistically close to actual training points → indirect membership inference. Module 11's MIA techniques generalize from supervised models, but clustering exposes this directly.
+- **Cluster-based anomaly detection is bypassable by "normal-shaping" inputs.** When defenders train K-Means on normal traffic and flag points far from any centroid as anomalous, attackers craft malicious inputs that stay close to a known centroid (low anomaly score) while still completing the malicious action. This is a recurring tactic in adversarial ML for IDS evasion.
+- **Initialization sensitivity = inconsistent boundaries across deployments.** Two K-Means models trained on the same data with different random seeds can produce different cluster boundaries. For defenders, this means anomaly detection thresholds aren't reproducible. For attackers, it means an attack tuned against one deployment may not transfer to a re-trained one (good for defenders if they re-train often, bad for attackers).
+- **Spherical-cluster assumption is exploitable.** Real attack-traffic distributions are often elongated or curved (e.g. low-and-slow scans). K-Means forces them into spherical clusters, leaving "natural" gaps where attack patterns can hide between centroids.
+- **Feature scaling probing.** Same as §9: if the deployment uses Z-score scaling (most do), an attacker submitting extreme-value probes can infer the (μ, σ) parameters → can craft inputs that survive normalization.
+- **Cluster IDs as features for downstream classifiers** is a common pipeline. If an attacker can flip an input's cluster assignment, they change a feature for the next model in the chain — chained-model attacks (Module 07's "insecure integrated components" pattern).
+- **K is a tuning knob with security implications.** Small K = broad clusters = lots of "normal" → easier to evade. Large K = fine-grained clusters = many tiny normal regions → harder to evade but more false positives. Same precision/recall trade-off appearing yet again.
+
+**Takeaways:**
+- 4-step iterative algorithm: init → assign → update → repeat. Minimizes WCSS = $\sum_k \sum_{x \in C_k} \lVert x - \mu_k \rVert^2$.
+- Converges to a **local** optimum; K-Means++ initialization mitigates bad starts (sklearn default).
+- Picking K: Elbow method (visual) + Silhouette analysis (quantitative) + domain knowledge.
+- Assumes spherical, similar-sized, scaled, outlier-free clusters — many failure modes for security data.
+- Centroids = means of training points → leak information; cluster-based anomaly detection is bypassable by normal-shaping.
 
 ---
 
