@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 4
+sections_done: 6
 started: "2026-04-14"
 completed: ""
 ---
@@ -532,13 +532,301 @@ Mnemonic: **L.I.N.E.** — Linearity, Independence, Normality, Equal variance (h
 
 ### 5. Logistic Regression
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+**Misnamed.** Logistic regression is a **classifier**, not a regressor. The name comes from the *logistic function* (sigmoid) it uses internally. It's binary classification's workhorse and the conceptual bridge from linear regression to neural networks.
+
+#### The pipeline
+
+```
+features ──► linear combination ──► sigmoid ──► probability ──► threshold ──► class
+   x      z = β₀ + β₁x₁ + … + βₙxₙ    σ(z)         p ∈ [0,1]      p ≥ 0.5?     0 or 1
+```
+
+**Logistic regression = linear regression + sigmoid.** Same $X \beta$ from §4, then squashed through $\sigma$ to land in $[0, 1]$ so we can read it as a probability.
+
+#### The sigmoid function
+
+$$
+\sigma(z) = \frac{1}{1 + e^{-z}}
+$$
+
+S-shaped curve (where the name comes from):
+
+```
+ σ(z)
+  1 ┤                           ╭────────────────
+    │                       ╭───╯
+    │                    ╭──╯
+  0.5┤                ╭──╯
+    │             ╭──╯
+    │         ╭──╯
+    │     ╭──╯
+  0 ┤────╯
+    └─────────────────────────────────────────→ z
+        −6      −2    0    2       6
+```
+
+Properties that make sigmoid the right choice for binary classification:
+
+| Property | Why it matters |
+|---|---|
+| Maps $(-\infty, +\infty) \to (0, 1)$ | Output reads as a probability |
+| Smooth, differentiable everywhere | Gradient descent works (unlike a hard step function) |
+| $\sigma(0) = 0.5$ | Natural classification threshold |
+| $\sigma(z) + \sigma(-z) = 1$ | Symmetric around 0 — flipping sign of $z$ flips the predicted class |
+
+The full prediction:
+
+$$
+p = \sigma(X \beta) = \frac{1}{1 + e^{-X\beta}}
+$$
+
+#### Logits and log-odds (terminology you'll meet constantly)
+
+The raw $z = X \beta$ value (before sigmoid) is called the **logit**. It's the *inverse* of the sigmoid:
+
+$$
+z = \log\!\left(\frac{p}{1 - p}\right)
+$$
+
+That ratio $\frac{p}{1-p}$ is the **odds** (e.g. "3-to-1 odds" = probability $0.75$). Its log = **log-odds**. Logistic regression assumes log-odds are linear in the features:
+
+$$
+\log\!\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 x_1 + \dots + \beta_n x_n
+$$
+
+In deep learning, the term **"logits"** means "the raw network output before softmax/sigmoid" — same concept, generalized. When module 09 talks about "gradient with respect to the logits", it's the gradient of $z$ here.
+
+#### Decision boundary — the central concept
+
+The model classifies $x$ as positive when $p(x) \geq 0.5$, which is equivalent to $z = X\beta \geq 0$. So the boundary is exactly:
+
+$$
+X \beta = 0
+$$
+
+That equation defines a **hyperplane** in feature space:
+
+| Feature space dimension | "Hyperplane" is actually a... |
+|---|---|
+| 1D (one feature) | Single point on the number line |
+| 2D (two features) | A line splitting the plane |
+| 3D (three features) | A flat plane splitting the room |
+| $n$D (many features) | An $(n-1)$-dimensional flat subspace |
+
+ASCII view in 2D:
+
+```
+ x₂
+  │
+  │   ●  ●     ●
+  │   ●●        ╲
+  │  ● ●         ╲ decision boundary: Xβ = 0
+  │     ●         ╲
+  │                ╲    □ □ □
+  │                 ╲  □ □ □ □
+  │     class 0      ╲  □  □
+  │                   ╲   class 1
+  │                    ╲
+  └─────────────────────────────→ x₁
+```
+
+Everything on one side: $z > 0$, predicted positive ($p > 0.5$). Other side: predicted negative. The line *itself* is where $p = 0.5$ exactly — the model's most uncertain region.
+
+#### Threshold tuning — precision/recall control knob
+
+Default threshold is 0.5, but you can move it:
+
+| Threshold | Effect |
+|---|---|
+| **Lower** (e.g. 0.3) | More instances cross into "positive" → ↑ recall, ↓ precision (catches more, more false alarms) |
+| **Higher** (e.g. 0.8) | Fewer instances classified positive → ↑ precision, ↓ recall (more confident, misses more) |
+
+Same precision/recall trade-off from §3 — now you can see exactly how it's controlled. Spam filter: high threshold (don't drop legit mail). Cancer screening: low threshold (don't miss a case).
+
+#### Assumptions
+
+| Assumption | Meaning |
+|---|---|
+| **Binary outcome** | Standard logistic regression handles 2 classes. (Multi-class extension: softmax / multinomial logistic regression.) |
+| **Linearity of log-odds** | The relationship between features and log-odds is linear (relaxed compared to linear regression — only the *odds* need to be linear, not the probabilities) |
+| **Low multicollinearity** | Features shouldn't be highly correlated with each other; otherwise coefficient interpretation breaks down |
+| **Large sample size** | Coefficient estimates are noisy with small data |
+
+#### Red-team angles — this is **the** attack-target section
+
+- **Decision boundaries ARE the attack target.** Every evasion attack in modules 08–10 (FGSM, I-FGSM, DeepFool, ElasticNet, JSMA) is mathematically: "find the smallest perturbation $\delta$ such that $x + \delta$ ends up on the *other side* of the decision boundary." For logistic regression specifically, the boundary is a single hyperplane → DeepFool can solve this in **one closed-form step** (project the input onto the hyperplane). That's why HTB introduces DeepFool right after FGSM in module 09.
+- **Linear decision boundaries are the easiest to attack.** The attack direction is just the normal vector $\beta$ of the hyperplane — no iteration needed. Neural networks have *piecewise-linear* boundaries (one per ReLU activation region), so attacks generalize but cost more compute.
+- **The sigmoid's flat tails create gradient masking opportunities.** When $z$ is very large positive or very negative, $\sigma'(z) \approx 0$. Adversaries-aware defenders sometimes try to push inputs into the flat region to hide gradients (and adversarial-attack-aware attackers counter with logit-targeting methods that bypass the saturated region).
+- **Logits are the canonical attack input.** Most modern adversarial attacks compute gradients of *logits* not probabilities — bypasses sigmoid saturation and gives stronger gradient signal. When module 09 says "we attack the pre-softmax outputs," it means logits.
+- **Threshold tuning = defender's last knob.** Moving the threshold changes attack difficulty: a defender who lowers the threshold (more aggressive blocking) forces attackers to push inputs further across the boundary. But it also raises false positives — same precision/recall trade-off, now framed adversarially.
+- **Module 02's spam classifier** uses Naive Bayes (next sections), but the spam-detection example here is the same problem. Module 04 (prompt injection) uses logistic-regression-style classifiers as content filters; bypassing those is exactly a "cross the decision boundary" task.
+
+**Takeaways:**
+- Logistic regression = linear regression $X\beta$ + sigmoid $\sigma(z) = \frac{1}{1+e^{-z}}$, then a threshold.
+- "Logit" = raw $z$ before sigmoid = log-odds. Used in every NN context.
+- Decision boundary = hyperplane where $X\beta = 0$ ($p = 0.5$). This is what evasion attacks target.
+- Threshold (default 0.5) is the precision/recall control knob.
+- Linear boundaries are easiest to attack; DeepFool exploits this exact case in one step.
 
 ---
 
 ### 6. Decision Trees
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A different beast from regression-based methods. Decision trees ask a sequence of yes/no questions about features and follow branches to a leaf that holds the prediction. **No equation, no gradient — just nested if-else rules.** Works for both classification and regression.
+
+#### Anatomy of a tree
+
+| Node type | Role |
+|---|---|
+| **Root** | Starting point; entire dataset enters here |
+| **Internal nodes** | Each tests one feature ("Outlook = Sunny?") and routes the sample down a branch |
+| **Leaves** | Terminal nodes that output the prediction (class label or numeric value) |
+
+ASCII view (the "Play Tennis" example, hand-drawn):
+
+```
+                       Outlook?
+                  ┌───────┼───────┐
+              Sunny    Overcast   Rainy
+                │         │        │
+            Humidity?    YES     Wind?
+            ┌───┴───┐           ┌───┴───┐
+          High    Normal      Strong    Weak
+            │       │           │        │
+           NO      YES         NO       YES
+```
+
+Reading: a sunny + high-humidity day → leaf says NO. Overcast → always YES, no further questions.
+
+#### Building the tree — pick the split that "purifies" the data fastest
+
+At each node, the algorithm scans every feature and chooses the one that **best separates** the classes in the resulting subsets. "Best" = whichever split most reduces *impurity* (synonyms: disorder, uncertainty). Three common impurity measures:
+
+##### Gini impurity
+
+Probability of misclassifying a randomly drawn sample if you label it according to the class distribution:
+
+$$
+\text{Gini}(S) = 1 - \sum_{i} p_i^2
+$$
+
+where $p_i$ is the proportion of samples in class $i$. Range: $0$ (perfectly pure — one class only) to $0.5$ (max for binary, equal split).
+
+Worked example: 30 of class A, 20 of class B → $p_A = 0.6, p_B = 0.4$:
+
+$$
+\text{Gini} = 1 - (0.6^2 + 0.4^2) = 1 - 0.52 = 0.48
+$$
+
+##### Entropy
+
+Information-theoretic disorder, in bits:
+
+$$
+H(S) = -\sum_{i} p_i \log_2 p_i
+$$
+
+Range: $0$ (pure) to $\log_2(k)$ for $k$ classes. For binary: max is $1.0$ (50/50 split).
+
+Same example: $p_A = 0.6, p_B = 0.4$:
+
+$$
+H = -(0.6 \log_2 0.6 + 0.4 \log_2 0.4) = -(0.6 \cdot {-0.737} + 0.4 \cdot {-1.322}) \approx 0.971
+$$
+
+(High disorder, close to the 1.0 max for binary — class proportions are nearly balanced.)
+
+##### Information Gain
+
+The reduction in entropy you get from making a split on feature $A$:
+
+$$
+\text{IG}(S, A) = H(S) - \sum_{v \in \text{values}(A)} \frac{|S_v|}{|S|} \cdot H(S_v)
+$$
+
+Picking the feature that **maximizes** information gain at each node = the standard greedy tree-building algorithm (ID3, C4.5).
+
+Worked example: dataset of 50 samples (30A, 20B), feature $F$ takes two values:
+
+| Branch | Counts | $p_A$ | $p_B$ | Entropy | Weight |
+|---|---|---|---|---|---|
+| $F=1$ | 30 (20A, 10B) | 0.667 | 0.333 | 0.918 | 30/50 = 0.6 |
+| $F=2$ | 20 (10A, 10B) | 0.5 | 0.5 | 1.000 | 20/50 = 0.4 |
+
+Weighted post-split entropy: $0.6 \cdot 0.918 + 0.4 \cdot 1.000 = 0.951$.
+
+Information Gain: $0.971 - 0.951 = 0.020$ — a small reduction. The algorithm would compare this against IG for every other feature and pick the largest.
+
+##### Gini vs. Entropy — which one?
+
+In practice they agree on most splits. Gini is faster (no log). Entropy is theoretically grounded in information theory. Most libraries (scikit-learn, XGBoost) use Gini by default; switch to entropy if you want the information-theoretic interpretation. The choice rarely changes the resulting tree meaningfully.
+
+#### Stopping criteria — when to stop splitting
+
+Without limits, a tree will keep splitting until every leaf has only one sample → perfectly memorizes the training set → terrible generalization (textbook overfitting). Standard stopping conditions:
+
+| Condition | Hyperparameter (sklearn) | Why |
+|---|---|---|
+| **Maximum depth** | `max_depth` | Bound the number of consecutive questions. Prevents the tree from growing too complex. |
+| **Min samples per leaf / split** | `min_samples_leaf`, `min_samples_split` | Don't make a split when too few samples remain — the resulting decision is unreliable. |
+| **Pure node** | (automatic) | All samples in the node belong to one class — no further split possible. |
+| **Min impurity decrease** | `min_impurity_decrease` | Stop if the best split doesn't reduce impurity by at least some threshold. |
+
+#### Decision boundary — axis-aligned, not arbitrary
+
+Each split tests one feature against one threshold (`x_3 ≤ 0.7?`). So the resulting decision boundary is a series of **axis-aligned hyperplane pieces** — staircases in 2D, blocks in higher dim:
+
+```
+ x₂
+  │  □ □  ●            ┌── tree boundary
+  │ □ □ │ ● ●          │
+  │ □ □ ┼──────────    │
+  │ □ □ │● ● ●         ▼
+  │     │
+  │  ───┴───────       (vertical and horizontal cuts only,
+  │  ●  │              no diagonal lines like logistic regression)
+  │  ●● │ □ □
+  └───────────────→
+                   x₁
+```
+
+This is fundamentally different from logistic regression's diagonal hyperplane.
+
+#### Assumptions — minimal
+
+This is one of decision trees' biggest selling points:
+
+| Linear regression assumed... | Decision trees... |
+|---|---|
+| Linearity between features and target | No assumption — handles non-linear relationships natively |
+| Normality of residuals | Doesn't care about distributions |
+| Sensitive to outliers (squared loss) | Robust — splits are based on order, not distance |
+| Comparable feature scales help | Scale-invariant — no normalization needed |
+
+You can throw raw, mixed-scale, non-normal, outlier-laden tabular data at a tree and it'll usually produce something useful with zero preprocessing.
+
+#### Red-team angles — different attack surface
+
+- **Gradient-based attacks (FGSM, DeepFool, JSMA) DON'T directly apply to trees.** Trees are non-differentiable (axis-aligned step functions) — there's no gradient $\nabla_x f$ to follow. Module 09's attacks target neural networks specifically. Trees have their own attack family.
+- **Decision-boundary evasion is still possible — but combinatorial, not gradient-based.** An attacker who knows the tree can find the smallest feature change that lands the input in a different leaf by walking the tree backwards. For categorical features, "evade" = flip a few bits.
+- **Trees are exceptionally easy to extract.** Each query reveals a path from root to leaf. With $\sim O(\text{tree size})$ targeted queries, an attacker can fully reconstruct the tree's structure and decision rules. Module 07's model reverse engineering — trees are the worst-case-for-defender model class for extraction attacks.
+- **Once extracted, trees are 100% interpretable.** An attacker reads the rules directly: "if `byte_entropy > 7.2 AND has_packer = TRUE → MALICIOUS`". They now know exactly which feature thresholds to keep their malware *under*. Compare to a deep net where extracting the model still leaves attackers needing gradient access to find evasions.
+- **Module 02 uses Random Forests** (an ensemble of decision trees) for **NSL-KDD network anomaly detection** — same vocabulary applies, plus the ensemble adds noise that makes pure extraction harder but doesn't fundamentally change the attack family.
+- **Overfitted trees memorize training points.** A tree without depth limits creates one leaf per training sample → membership inference becomes trivial: query the tree, see if your guess matches a leaf's class with 100% confidence (likely a training point) vs. lower confidence (likely unseen).
+- **Tree information gain uses $\log_2$** — same information-theoretic machinery as DP-SGD's privacy-budget accounting (module 11). Different application, same math.
+
+**Takeaways:**
+- Trees = nested if-else; root → internal questions → leaf prediction.
+- Build by greedy splitting on the feature with highest information gain (or lowest Gini).
+- Three impurity measures: **Gini** (fast, default), **Entropy** (info-theoretic), **Information Gain** (entropy reduction).
+- Stopping: max depth, min samples per leaf, pure nodes — all hedge against overfitting.
+- Decision boundary = axis-aligned staircase, not arbitrary hyperplane.
+- Minimal assumptions; works on raw tabular data.
+- Attack surface differs from neural nets: no gradient attacks, but trivially extractable + 100% interpretable once extracted.
 
 ---
 
