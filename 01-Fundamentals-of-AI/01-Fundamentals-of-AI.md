@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 18
+sections_done: 19
 started: "2026-04-14"
 completed: ""
 ---
@@ -2597,7 +2597,166 @@ One step per minibatch. Over thousands of minibatches, the weights converge to a
 
 ### 19. Convolutional Neural Networks
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A specialized architecture for **grid-like data** (images, video, sometimes text). CNNs exploit two key properties of such data — **locality** (nearby pixels are related) and **stationarity** (a feature means the same thing anywhere in the image) — to be far more parameter-efficient than fully-connected MLPs.
+
+CNNs are the architecture you'll attack across most of modules 06, 09, and 10. Classic canonical examples: ImageNet classification, stop-sign recognition in self-driving cars, malware classification when bytes are visualized as 2D images (Module 02's Malware Classification).
+
+#### Three layer types
+
+```
+Input image → [Conv → ReLU → Pool] × N → Flatten → [FC → ReLU] × M → Softmax → class
+
+─────────────────────────────────────   ──────   ────────────────────────
+        feature extraction                |              classification
+   (learned hierarchical filters)    flatten the 2D         (MLP from §18)
+                                     features to 1D
+```
+
+| Layer | Role | What's new vs MLP |
+|---|---|---|
+| **Convolutional** | Apply learnable filters that slide across input to detect features | Replaces fully-connected layer — fewer weights, local receptive fields, weight sharing |
+| **Pooling** | Downsample feature maps — max or average over small windows | Reduces spatial dimensions, adds translation invariance |
+| **Fully Connected** | Classic MLP layers at the end for final reasoning/classification | Same as §18 |
+
+#### The convolution operation
+
+A **filter** (also called **kernel**) is a small matrix of learned weights — typically 3×3 or 5×5. It slides across the input, and at each position computes a single output value: the **elementwise multiplication** of the filter and the patch it's over, summed.
+
+```
+  Input (5×5)              Filter (3×3)           Feature map (3×3)
+  ┌──┬──┬──┬──┬──┐         ┌──┬──┬──┐
+  │ 1│ 0│ 2│ 1│ 3│         │ 1│ 0│-1│
+  ├──┼──┼──┼──┼──┤         ├──┼──┼──┤
+  │ 2│ 1│ 0│ 1│ 2│   ★     │ 1│ 0│-1│    =      ┌──┬──┬──┐
+  ├──┼──┼──┼──┼──┤  conv   ├──┼──┼──┤           │ ?│ ?│ ?│
+  │ 0│ 2│ 1│ 3│ 0│         │ 1│ 0│-1│           ├──┼──┼──┤
+  ├──┼──┼──┼──┼──┤         └──┴──┴──┘           │ ?│ ?│ ?│
+  │ 1│ 2│ 0│ 2│ 1│         (vertical-edge       ├──┼──┼──┤
+  ├──┼──┼──┼──┼──┤          detector —          │ ?│ ?│ ?│
+  │ 3│ 0│ 1│ 2│ 1│          Sobel-like)         └──┴──┴──┘
+  └──┴──┴──┴──┴──┘
+```
+
+Formally, the 2D convolution of input $I$ with filter $K$ at position $(i, j)$:
+
+$$
+(I * K)(i, j) = \sum_m \sum_n I(i+m, j+n) \cdot K(m, n)
+$$
+
+Key properties:
+
+| Property | What it is | Why it matters |
+|---|---|---|
+| **Weight sharing** | The same filter applies at every position | A "vertical edge" anywhere in the image activates the same filter — massive parameter reduction vs a fully-connected layer, and built-in translation invariance |
+| **Local connectivity (receptive field)** | Each output cell depends only on a small local patch of input | Captures local structure efficiently; dramatically reduces weights compared to FC layers |
+| **Multiple filters per layer** | A typical conv layer has 32–512 filters | Each filter learns a different feature (horizontal edges, vertical edges, diagonal edges, color blobs, etc.); stacked outputs form a multi-channel feature map |
+
+##### Hyperparameters specific to conv layers
+
+| Hyperparameter | Meaning |
+|---|---|
+| **Kernel size** | Filter dimensions (3×3, 5×5, 7×7). Smaller = sharper locality; larger = more context per step |
+| **Stride** | How far the filter moves between applications. Stride 1 = overlapping patches; stride 2 = halves output size |
+| **Padding** | Zeros added around input edges to control output size. "Same" padding preserves spatial dimensions; "valid" lets output shrink |
+| **Number of filters** | Output channels = number of different features this layer learns |
+
+#### Pooling — downsample the feature maps
+
+After a conv layer, a **pooling layer** shrinks each feature map's spatial dimensions by taking a summary statistic over small windows.
+
+```
+  Max pooling (2×2 window, stride 2):
+
+   Input 4×4             Output 2×2
+   ┌──┬──┬──┬──┐
+   │ 1│ 3│ 2│ 4│         ┌──┬──┐
+   ├──┼──┼──┼──┤         │ 3│ 4│       max(1,3,2,1) = 3
+   │ 2│ 1│ 1│ 0│    →    ├──┼──┤       max(2,4,1,0) = 4
+   ├──┼──┼──┼──┤         │ 5│ 8│       max(0,5,3,2) = 5
+   │ 0│ 5│ 3│ 2│         └──┴──┘       max(1,4,7,8) = 8
+   ├──┼──┼──┼──┤
+   │ 1│ 4│ 7│ 8│
+   └──┴──┴──┴──┘
+```
+
+| Pooling type | Operation | When |
+|---|---|---|
+| **Max pooling** | Take the maximum over the window | Most common — preserves strong activations, discards weaker ones |
+| **Average pooling** | Take the mean over the window | Smoother summarization; used in "global average pooling" at final layers |
+
+Pooling achieves three things: (1) reduces computation for subsequent layers, (2) adds a small degree of translation invariance (the exact pixel doesn't matter, just "something strong happened here"), (3) reduces overfitting by summarizing.
+
+#### Hierarchical feature learning — the CNN story
+
+Stack conv-pool blocks deep, and the features progress from primitive to abstract:
+
+```
+Layer 1: edges, corners, simple textures
+          ↓
+Layer 2: textures + edges combine → patterns, simple shapes
+          ↓
+Layer 3: patterns combine → object parts (eyes, wheels, characters)
+          ↓
+Layer 4: object parts combine → whole objects (faces, cars, digits)
+          ↓
+        FC layers → final classification
+```
+
+This is the hierarchical feature learning from §16, now architecturally baked in: conv layers at different depths specialize on features of different abstraction levels.
+
+#### A canonical image-classifier CNN
+
+```
+Input: 224×224 RGB image (shape: 3 × 224 × 224)
+  ↓
+Conv(64 filters, 3×3) → ReLU → Pool(2×2)    # → 64 × 112 × 112
+  ↓
+Conv(128 filters, 3×3) → ReLU → Pool(2×2)   # → 128 × 56 × 56
+  ↓
+Conv(256 filters, 3×3) → ReLU → Pool(2×2)   # → 256 × 28 × 28
+  ↓
+Conv(512 filters, 3×3) → ReLU → Pool(2×2)   # → 512 × 14 × 14
+  ↓
+Flatten                                     # → 512 × 196 = 100352
+  ↓
+FC(4096) → ReLU → Dropout
+  ↓
+FC(1000) → Softmax                          # → probabilities over 1000 classes
+```
+
+This is roughly the shape of VGG16 (a classic CNN). ResNet, DenseNet, EfficientNet, and modern variants add skip connections and other tricks — but the core conv-pool-FC pattern remains.
+
+#### The four key assumptions — and how attackers exploit each
+
+| Assumption | What it means | How attackers exploit it |
+|---|---|---|
+| **Grid-like structure** | Data has 2D/3D spatial layout | Exploit the grid structure to craft perturbations along it (pixel-level attacks) |
+| **Spatial hierarchy** | Features compose from simple (low) to abstract (high) | Target specific hierarchy levels — e.g. flip only the edge-level features, leave high-level unchanged |
+| **Feature locality** | Relevant correlations are in small neighborhoods | **Adversarial patches** — a small localized region can hijack the prediction (physical-world stop-sign attacks) |
+| **Feature stationarity** | Same feature = same meaning everywhere (weight sharing) | **Universal adversarial perturbations** — one perturbation pattern that fools the CNN regardless of where you put it in the image |
+
+#### Red-team angles — this is THE architecture for Modules 06, 09, 10
+
+- **Every classic adversarial-example paper is about attacking CNNs.** Szegedy 2013, Goodfellow FGSM 2014, DeepFool 2016, Carlini-Wagner 2017, JSMA, ElasticNet — all evaluated primarily on CNN image classifiers. Module 09 implements FGSM against CNNs; Module 10 implements JSMA/ElasticNet against CNNs.
+- **Pixel-level attacks work because CNNs preserve pixel structure.** A small $L_\infty$ perturbation at every pixel (FGSM) aggregates into coherent feature-level signals because the receptive fields of early layers see overlapping neighborhoods. The gradient $\nabla_x \mathcal{L}$ has spatial structure, and attackers follow it.
+- **Adversarial patches exploit feature locality + stationarity together.** A small (e.g. 50×50) crafted patch placed *anywhere* in a larger image can make a CNN classify the whole image as a chosen target class. Because the CNN applies the same filters everywhere, the patch's local activations propagate up regardless of placement. Eykholt et al. 2017's "Robust Physical-World Attacks" on stop signs is the canonical example — physical stickers that flip a CNN's classification.
+- **Universal adversarial perturbations** (Moosavi-Dezfooli 2017) — a single perturbation image that fools the target CNN when added to *almost any* input. Exploits stationarity at scale.
+- **Trojan attacks (Module 06) are designed around CNN structure.** Inject training examples with a small trigger pattern (e.g. a 3×3 pixel sticker in the corner) labeled with an attacker-chosen class. The CNN learns a filter chain that responds to the trigger → at deployment, any input with that pattern triggers the backdoor classification. The weight-sharing + local-receptive-field properties are exactly why this works: the trojan trigger can be placed anywhere.
+- **Tensor steganography (Module 06)** hides data in CNN weight tensors. Because CNNs have huge weight matrices with some numerical redundancy, attackers can modulate low-order bits of weights to encode hidden payloads without noticeably affecting classification. Covered in detail in Module 06 §5.
+- **Feature visualization (DeepDream, Olah et al.) reveals what each filter detects.** Attackers use this to understand which filters to target — craft inputs that maximally activate a specific filter chain leading to the desired output. Google "activation atlases" for the research literature.
+- **JSMA (Module 10) is specifically designed for CNN pixel attacks.** It iteratively modifies one or two pixels at a time based on gradient saliency, producing extremely sparse adversarial examples. Works so well on CNNs because of the local-receptive-field structure: targeting the right pixels has focused effects on specific filter activations.
+- **Dropout does not help against adversarial examples.** CNNs with aggressive dropout are still trivially attacked — dropout randomizes training but the learned features are still susceptible to gradient-based perturbations. This is documented extensively; don't let anyone tell you dropout is a defense.
+- **Malware-as-image classifiers** (Module 02's Malware Classification exercise uses ResNet50) apply the same CNN machinery — so every CNN attack transfers. Adversarial perturbations of malware-image representations can flip malicious → benign classifications.
+
+**Takeaways:**
+- CNN = stacked conv + pool blocks for hierarchical feature extraction from grid data, followed by FC layers for classification.
+- Convolution operation: filter slides across input, elementwise multiply + sum at each position → feature map. $(I * K)(i, j) = \sum_m \sum_n I(i+m, j+n) K(m, n)$.
+- Weight sharing + local connectivity = fewer parameters + translation invariance.
+- Hierarchy: early layers = primitives (edges), deep layers = objects.
+- Four assumptions: grid structure, spatial hierarchy, locality, stationarity — **each corresponds to a specific adversarial attack family**.
+- **THE architecture for Modules 06, 09, 10 attacks.** Pixel-level adversarial examples, adversarial patches, universal perturbations, Trojan backdoors, tensor steganography — all target CNN structure.
 
 ---
 
