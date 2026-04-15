@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Obsidian workspace state (keep themes/hotkeys/plugins)
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/app.json.bak
+
+# Model weights (retrain in Colab)
+*.pt
+*.pth
+*.h5
+*.onnx
+*.safetensors
+
+# Datasets (live in Drive, tracked in datasets.md)
+data/
+*.npz
+*.parquet
+# CSVs under 1 MB are fine to commit; larger ones belong in Drive.
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
