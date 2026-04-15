@@ -6,7 +6,7 @@ difficulty: "Medium"
 tier: ""
 estimated_time: ""
 sections_total: 24
-sections_done: 8
+sections_done: 9
 started: "2026-04-14"
 completed: ""
 ---
@@ -1085,7 +1085,132 @@ Common kernels:
 
 ### 9. Unsupervised Learning Algorithms
 
-**Status:** - [ ]  |  **Type:** Theory
+**Status:** - [x]  |  **Type:** Theory  |  **Completed:** 2026-04-14
+
+A different paradigm: **no labels.** The algorithm is shown only the inputs $x$, never the answers $y$. Its job is to discover *structure* in the data — which points belong together, which directions matter, which observations are weird.
+
+#### Three problem types
+
+| Type | Goal | Examples | Where in path |
+|---|---|---|---|
+| **Clustering** | Group similar points (no predefined classes) | Customer segmentation, document topics | §10 K-Means |
+| **Dimensionality reduction** | Compress features while preserving info | Image compression, feature engineering for downstream models | §11 PCA |
+| **Anomaly detection** | Spot points unlike the rest | Fraud detection, intrusion detection, malware behavior | §12 + **Module 02 network anomaly detection** |
+
+#### Similarity measures — the foundation
+
+Most unsupervised algorithms reduce to "how close are these two points?" Three measures dominate:
+
+##### Euclidean distance (L2)
+
+Straight-line distance — the default for most clustering algorithms.
+
+$$
+d_{\text{Euclidean}}(\mathbf{x}, \mathbf{y}) = \sqrt{\sum_{i=1}^{n}(x_i - y_i)^2} = \lVert \mathbf{x} - \mathbf{y} \rVert_2
+$$
+
+Same $L_2$ norm from §2. Sensitive to feature scale (a feature ranging 0–1000 will dominate one ranging 0–1 if you don't scale them).
+
+##### Manhattan distance (L1)
+
+Sum of absolute coordinate differences — like walking city blocks instead of cutting diagonally.
+
+$$
+d_{\text{Manhattan}}(\mathbf{x}, \mathbf{y}) = \sum_{i=1}^{n} \lvert x_i - y_i \rvert = \lVert \mathbf{x} - \mathbf{y} \rVert_1
+$$
+
+Same $L_1$ norm from §2. More robust to outliers than Euclidean (no squaring → outliers don't dominate).
+
+##### Cosine similarity
+
+Measures the **angle** between vectors, ignoring their magnitudes.
+
+$$
+\cos(\mathbf{x}, \mathbf{y}) = \frac{\mathbf{x} \cdot \mathbf{y}}{\lVert \mathbf{x} \rVert \lVert \mathbf{y} \rVert}
+$$
+
+Range: $-1$ (opposite directions) to $+1$ (same direction). $0$ = orthogonal (unrelated).
+
+**This is THE similarity measure for embedding spaces** — LLM word embeddings, sentence embeddings, image embeddings, RAG document retrieval. When you hear "vector database" or "semantic search," cosine similarity is the underlying metric. Critical for understanding Module 04 / 05 prompt injection vectors that work by manipulating retrieval.
+
+#### Cluster validity — "are these clusters even real?"
+
+Two complementary metrics evaluate cluster quality:
+
+| Metric | What it measures | Want |
+|---|---|---|
+| **Cohesion** | How tightly packed points are *within* a cluster | High |
+| **Separation** | How far apart different clusters are | High |
+
+Combined into single-number scores:
+
+| Score | Range | Interpretation |
+|---|---|---|
+| **Silhouette score** | $[-1, +1]$ | Per-point: $+1$ = clearly in its cluster, $0$ = on a boundary, $-1$ = likely in wrong cluster. Average over all points = overall quality. |
+| **Davies-Bouldin index** | $[0, \infty)$ | Lower = better. Average ratio of within-cluster scatter to between-cluster distance. |
+
+These also help pick **how many clusters** to use (the $k$ in K-Means) — try several $k$ values, pick the one with the best silhouette.
+
+#### Dimensionality and the curse
+
+**Dimensionality** = number of features. **Intrinsic dimensionality** = the effective complexity of the data, which can be much lower than the feature count (e.g. 1000 pixel features encoding a face that lives on a roughly-50-dimensional manifold).
+
+The **curse of dimensionality** — counterintuitive things that happen as $d$ grows:
+
+1. **Distances flatten.** In high dimensions, *all* points become roughly equidistant. The ratio $\frac{\max d - \min d}{\min d} \to 0$ as $d \to \infty$. → Distance-based methods (K-Means, KNN, anomaly detectors using distance thresholds) become noisier.
+2. **Volume concentrates at the boundary.** Most of a high-dimensional sphere's volume sits near its surface — counterintuitive but true (and exploitable).
+3. **Sparsity.** A fixed number of samples covers an exponentially-shrinking fraction of the input space as $d$ grows.
+
+This is exactly what dimensionality reduction (§11 PCA) is for: project down to the data's intrinsic dimensionality where distances and density estimates become meaningful again.
+
+#### Anomaly vs. outlier — different vocabulary
+
+| Term | Connotation | Implies |
+|---|---|---|
+| **Outlier** | Statistical deviation — "far from the bulk" | Could be noise, measurement error, or genuine extreme value |
+| **Anomaly** | Domain-meaningful deviation — "doesn't fit the model of normal" | Usually implies *something interesting* is going on (fraud, intrusion, malfunction) |
+
+Same data point can be both, neither, or one without the other. In security writing: "outlier" usually means a statistical concept; "anomaly" usually implies a security-relevant event worth investigating.
+
+#### Feature scaling — required for distance-based methods
+
+Distance-based algorithms (every clustering and anomaly method) treat all features as if they're on the same scale. If they aren't, the largest-magnitude feature dominates. Two standard techniques:
+
+##### Min-Max scaling
+
+$$
+x' = \frac{x - x_{\min}}{x_{\max} - x_{\min}}
+$$
+
+Maps every feature to $[0, 1]$. Simple, but sensitive to outliers (one extreme value compresses everything else into a narrow range).
+
+##### Z-score standardization
+
+$$
+x' = \frac{x - \mu}{\sigma}
+$$
+
+Centers each feature at 0 with unit variance. More robust to outliers and the standard preprocessing for PCA, K-Means, SVMs.
+
+**You always do one of these before running an unsupervised algorithm on multi-scale features.** Forgetting is the #1 source of "why are my clusters garbage?" results.
+
+#### Red-team angles
+
+- **Module 02's Network Anomaly Detection exercise is unsupervised anomaly detection on NSL-KDD.** The same vocabulary applies: distance-to-normal threshold, curse of dimensionality concerns at 41 features, feature scaling required.
+- **Anomaly detectors are the defense — bypassing them is a red-team primitive.** "Living off the land" attacks (using legitimate tools so the behavior stays close to baseline) are exactly anomaly evasion. Adversarial-ML literature has principled versions: craft inputs that minimize the anomaly score while still achieving the malicious goal.
+- **Curse of dimensionality is exploitable.** When defenders run anomaly detection on high-dim feature spaces (raw network flows, full process trees), distances become uninformative → noisy detectors → easier to hide. Attackers add noise dimensions; defenders apply PCA first to combat this.
+- **Cosine similarity is the metric for LLM/RAG attacks.** When module 04/05 deals with prompt injection via retrieved context, the retrieval is cosine-similarity over embeddings. Crafting an "injectable document" = crafting a vector that lands close-to-query in cosine space while carrying malicious instructions in its text.
+- **Feature scaling parameters (min, max, μ, σ) are persistence-relevant.** They're computed once at training time and applied at inference. If an attacker can probe the scaler (e.g. by submitting extreme values and observing rejections), they learn the deployment-time normalization range — useful for crafting adversarial inputs that survive preprocessing.
+- **Clustering can leak training data.** Tight clusters with few members reveal that those members were probably training points. K-Means specifically returns *centroids* — averages of training points — which can leak aggregated information about training data composition.
+- **Silhouette score on adversarial inputs reveals attacks.** Adversarial examples often have low silhouette scores (they're between clusters, not in any) — defenders sometimes use this as a detection signal. Attackers respond by adding constraints to keep cluster membership clean while still flipping the prediction.
+
+**Takeaways:**
+- Three unsupervised problems: clustering, dimensionality reduction, anomaly detection. Module 02 uses #3 (anomaly detection on NSL-KDD).
+- Three similarity measures: Euclidean ($L_2$, default), Manhattan ($L_1$, outlier-robust), Cosine (the embedding-space metric — critical for LLM/RAG context).
+- Cluster validity: cohesion + separation → silhouette score, Davies-Bouldin index.
+- Curse of dimensionality flattens distances → distance-based methods fail in high dim → need dimensionality reduction.
+- Anomaly = domain-meaningful deviation; outlier = statistical deviation.
+- Always feature-scale (Min-Max or Z-score) before distance-based unsupervised methods.
 
 ---
 
